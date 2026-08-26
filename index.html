@@ -200,10 +200,10 @@ footer .update-note b{ color:var(--text-muted); }
 .chart-zoom-controls button:hover{ color:var(--text); border-color:var(--text-dim); }
 .chart-zoom-controls button.chart-zoom-close-btn{ font-size:19px; margin-left:6px; }
 #chart-zoom-level{ font-family:var(--font-mono); font-size:11px; color:var(--text-dim); min-width:38px; text-align:center; }
-.chart-zoom-viewport{ flex:1; margin-top:10px; position:relative; overflow:hidden; border:1px solid var(--border-soft); border-radius:10px; background:var(--bg-inset); touch-action:none; cursor:default; }
+.chart-zoom-viewport{ flex:1; margin-top:10px; position:relative; overflow-x:auto; overflow-y:hidden; border:1px solid var(--border-soft); border-radius:10px; background:var(--bg-inset); touch-action:pan-x; cursor:default; }
 .chart-zoom-viewport.pannable{ cursor:grab; }
 .chart-zoom-viewport.panning{ cursor:grabbing; }
-.chart-zoom-stage{ width:100%; height:100%; transform-origin:0 0; will-change:transform; }
+.chart-zoom-stage{ width:100%; height:100%; }
 #chart-zoom-box{ width:100%; height:100%; }
 .chart-zoom-hint{ margin-top:8px; font-size:11px; color:var(--text-dim); text-align:center; }
 </style>
@@ -422,7 +422,7 @@ footer .update-note b{ color:var(--text-muted); }
         <div class="chart-box" id="chart-zoom-box"><div id="chart-zoom-target" class="svg-chart"></div></div>
       </div>
     </div>
-    <div class="chart-zoom-hint">Scroll or pinch to zoom · drag to pan once zoomed in · double-click to reset</div>
+    <div class="chart-zoom-hint">Scroll or pinch to widen the x-axis · drag to pan · double-click to reset</div>
   </div>
 </div>
 <div id="chart-tooltip"></div>
@@ -521,7 +521,17 @@ function attachChartExpandButtons(root){
   });
 }
 
-let ZOOM = { scale:1, x:0, y:0, chartId:null };
+// Zooming used to CSS-scale a fixed-size picture of the chart uniformly in
+// both directions — a blunt magnifying glass over the same pixels, aspect
+// ratio unchanged. Every chart already measures its own container's real
+// pixel size and draws to fit it (see chartSize() above), so instead of
+// scaling a picture, zooming here makes the chart itself wider and asks it
+// to redraw: bars/points/ticks get real extra room and gain actual detail
+// (closer-spaced labels resolve, bars separate) rather than the same shapes
+// blown up and blurred. The vertical axis is deliberately left alone —
+// height always matches the viewport — so the chart's aspect ratio stretches
+// wide as you zoom in, instead of the whole picture growing uniformly.
+let ZOOM = { scale:1, chartId:null };
 function chartZoomEls(){
   return {
     modal: document.getElementById('chart-zoom-modal'),
@@ -532,23 +542,46 @@ function chartZoomEls(){
   };
 }
 function clampZoomScale(s){ return Math.min(6, Math.max(1, s)); }
-function applyZoomTransform(){
+
+// Re-render is coalesced to one per animation frame so rapid wheel/pinch
+// input doesn't trigger a full chart rebuild (all points, all listeners) on
+// every event.
+let _zoomRenderScheduled = false;
+function scheduleZoomRerender(){
+  if(_zoomRenderScheduled) return;
+  _zoomRenderScheduled = true;
+  requestAnimationFrame(() => {
+    _zoomRenderScheduled = false;
+    const entry = CHART_REGISTRY[ZOOM.chartId];
+    if(!entry) return;
+    const container = document.getElementById('chart-zoom-target');
+    if(container) container.innerHTML = '';
+    entry.render('chart-zoom-target');
+  });
+}
+// anchor (optional): {anchorPx, frac} — keeps the same horizontal fraction of
+// the chart under anchorPx (a cursor position or pinch midpoint, relative to
+// the viewport) as the width changes, so zooming feels centered on where you
+// pointed rather than snapping back to the left edge.
+function applyZoom(anchor){
   const {viewport, stage, level} = chartZoomEls();
-  stage.style.transform = `translate(${ZOOM.x}px, ${ZOOM.y}px) scale(${ZOOM.scale})`;
+  const vpW = viewport.clientWidth || 1;
+  const targetW = Math.round(vpW * ZOOM.scale);
+  stage.style.width = targetW + 'px';
+  viewport.scrollLeft = anchor ? (anchor.frac*targetW - anchor.anchorPx) : 0;
   level.textContent = Math.round(ZOOM.scale*100) + '%';
   viewport.classList.toggle('pannable', ZOOM.scale > 1);
+  scheduleZoomRerender();
 }
-function resetZoom(){ ZOOM.scale=1; ZOOM.x=0; ZOOM.y=0; applyZoomTransform(); }
-function zoomBy(factor, aroundVpX, aroundVpY){
+function resetZoom(){ ZOOM.scale=1; applyZoom(); }
+function zoomBy(factor, atVpX){
   const {viewport} = chartZoomEls();
   const rect = viewport.getBoundingClientRect();
-  const cx = aroundVpX!=null ? aroundVpX : rect.width/2;
-  const cy = aroundVpY!=null ? aroundVpY : rect.height/2;
-  const prevScale = ZOOM.scale;
-  const newScale = clampZoomScale(prevScale*factor);
-  const sx = (cx - ZOOM.x)/prevScale, sy = (cy - ZOOM.y)/prevScale;
-  ZOOM.x = cx - sx*newScale; ZOOM.y = cy - sy*newScale; ZOOM.scale = newScale;
-  applyZoomTransform();
+  const anchorPx = atVpX!=null ? atVpX : rect.width/2;
+  const oldW = Math.max(1, viewport.scrollWidth);
+  const frac = (viewport.scrollLeft + anchorPx) / oldW;
+  ZOOM.scale = clampZoomScale(ZOOM.scale*factor);
+  applyZoom({ anchorPx, frac });
 }
 function openChartZoom(chartId){
   const entry = CHART_REGISTRY[chartId];
@@ -557,15 +590,10 @@ function openChartZoom(chartId){
   title.textContent = entry.title || '';
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
-  ZOOM = { scale:1, x:0, y:0, chartId };
-  applyZoomTransform();
-  // Render on the next couple of frames so the modal has finished laying out
-  // and chart-zoom-target has its real (large) size before the chart measures it.
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    const container = document.getElementById('chart-zoom-target');
-    if(container) container.innerHTML = '';
-    entry.render('chart-zoom-target');
-  }));
+  ZOOM = { scale:1, chartId };
+  // Wait for the modal to finish laying out (two frames, to be safe across
+  // browsers) so the viewport has its real size before applyZoom measures it.
+  requestAnimationFrame(() => requestAnimationFrame(() => applyZoom()));
 }
 function closeChartZoom(){
   document.getElementById('chart-zoom-modal').style.display = 'none';
@@ -582,55 +610,53 @@ safe('chart zoom modal', function(){
   document.addEventListener('keydown', e => { if(e.key==='Escape' && modal.style.display!=='none') closeChartZoom(); });
   viewport.addEventListener('dblclick', resetZoom);
 
+  // Vertical wheel motion (a mouse wheel, or a trackpad's vertical two-finger
+  // scroll) zooms. Horizontal motion is left alone so a trackpad's horizontal
+  // swipe pans by scrolling the viewport natively — no custom code needed.
   viewport.addEventListener('wheel', e => {
+    if(Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
     e.preventDefault();
     const rect = viewport.getBoundingClientRect();
-    zoomBy(Math.pow(1.0016, -e.deltaY), e.clientX-rect.left, e.clientY-rect.top);
+    zoomBy(Math.pow(1.0016, -e.deltaY), e.clientX-rect.left);
   }, {passive:false});
 
-  let dragging=false, dragStart={x:0,y:0}, panOrigin={x:0,y:0};
+  // Click-drag panning for a plain mouse (trackpad swipes and touch already
+  // pan via the viewport's native horizontal scrolling).
+  let dragging=false, dragStartX=0, startScrollLeft=0;
   viewport.addEventListener('mousedown', e => {
     if(ZOOM.scale<=1) return;
-    dragging=true; dragStart={x:e.clientX,y:e.clientY}; panOrigin={x:ZOOM.x,y:ZOOM.y};
+    dragging=true; dragStartX=e.clientX; startScrollLeft=viewport.scrollLeft;
     viewport.classList.add('panning');
   });
   window.addEventListener('mousemove', e => {
     if(!dragging) return;
-    ZOOM.x = panOrigin.x + (e.clientX-dragStart.x);
-    ZOOM.y = panOrigin.y + (e.clientY-dragStart.y);
-    applyZoomTransform();
+    viewport.scrollLeft = startScrollLeft - (e.clientX-dragStartX);
   });
   window.addEventListener('mouseup', () => { dragging=false; viewport.classList.remove('panning'); });
 
-  let touchState=null;
+  // Two-finger pinch zooms; a single finger pans natively via the viewport's
+  // own horizontal scrolling (touch-action:pan-x in the CSS above).
+  let pinch=null;
   viewport.addEventListener('touchstart', e => {
     if(e.touches.length===2){
       const [a,b]=e.touches;
-      touchState={ mode:'pinch', dist:Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY), scale:ZOOM.scale, mid:{x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2}, origin:{x:ZOOM.x,y:ZOOM.y} };
-    } else if(e.touches.length===1 && ZOOM.scale>1){
-      touchState={ mode:'pan', start:{x:e.touches[0].clientX,y:e.touches[0].clientY}, origin:{x:ZOOM.x,y:ZOOM.y} };
+      const rect=viewport.getBoundingClientRect();
+      pinch={ dist:Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY), scale:ZOOM.scale, midX:(a.clientX+b.clientX)/2-rect.left };
+    } else {
+      pinch=null;
     }
   }, {passive:true});
   viewport.addEventListener('touchmove', e => {
-    if(!touchState) return;
-    if(touchState.mode==='pinch' && e.touches.length===2){
-      e.preventDefault();
-      const [a,b]=e.touches;
-      const dist=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);
-      const newScale=clampZoomScale(touchState.scale*(dist/touchState.dist));
-      const rect=viewport.getBoundingClientRect();
-      const cx=touchState.mid.x-rect.left, cy=touchState.mid.y-rect.top;
-      const sx=(cx-touchState.origin.x)/touchState.scale, sy=(cy-touchState.origin.y)/touchState.scale;
-      ZOOM.x=cx-sx*newScale; ZOOM.y=cy-sy*newScale; ZOOM.scale=newScale;
-      applyZoomTransform();
-    } else if(touchState.mode==='pan' && e.touches.length===1){
-      e.preventDefault();
-      ZOOM.x = touchState.origin.x + (e.touches[0].clientX-touchState.start.x);
-      ZOOM.y = touchState.origin.y + (e.touches[0].clientY-touchState.start.y);
-      applyZoomTransform();
-    }
+    if(!pinch || e.touches.length!==2) return;
+    e.preventDefault();
+    const [a,b]=e.touches;
+    const dist=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);
+    const oldW=Math.max(1, viewport.scrollWidth);
+    const frac=(viewport.scrollLeft + pinch.midX) / oldW;
+    ZOOM.scale=clampZoomScale(pinch.scale*(dist/pinch.dist));
+    applyZoom({ anchorPx: pinch.midX, frac });
   }, {passive:false});
-  viewport.addEventListener('touchend', () => { touchState=null; });
+  viewport.addEventListener('touchend', () => { pinch=null; });
 });
 
 function renderVolumeChart(containerId, weekly){
@@ -916,8 +942,7 @@ function redrawCharts(){
   safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]){ const lr=DATA.longRuns[ACTIVE_SPLIT_ID]; registerChart('chart-splits', `Long Run Splits — ${lr.label}`, renderSplitsChart, lr.splits, 'splits-legend', lr.elevProfile, lr.mileBased); } });
   Object.values(ROUTE_MAP_INSTANCES).forEach(m=>{ try{ m.invalidateSize(); }catch(e){} });
   if(ZOOM.chartId && CHART_REGISTRY[ZOOM.chartId] && document.getElementById('chart-zoom-modal').style.display!=='none'){
-    resetZoom();
-    CHART_REGISTRY[ZOOM.chartId].render('chart-zoom-target');
+    resetZoom(); // also schedules a re-render at the viewport's new size
   }
 }
 let _resizeTimer;

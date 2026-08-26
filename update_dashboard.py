@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from garminconnect import Garmin
 
 # =====================================================================
@@ -7,6 +7,10 @@ from garminconnect import Garmin
 # =====================================================================
 HISTORY_DAYS = 180          # how far back to pull runs for charts/log
 RHR_TREND_DAYS = 7          # resting HR sparkline window
+VO2_TREND_DAYS = 84         # ~12 weeks, for the VO2 max trend sparkline
+
+RACE_DATE = date(2026, 11, 8)
+RACE_NAME = "Half Marathon"
 
 MI_PER_M = 1 / 1609.344
 FT_PER_M = 3.28084
@@ -34,6 +38,8 @@ def fmt_pace(sec_per_mile):
     return f"{mm}:{ss:02d}"
 
 def fmt_duration(seconds):
+    if seconds is None:
+        return "—"
     seconds = int(seconds or 0)
     h, rem = divmod(seconds, 3600)
     m, s = divmod(rem, 60)
@@ -165,6 +171,218 @@ def build_insights(weeks, runs, today=None):
     insights.append(f"Total distance: {total_miles:.1f} mi across {len(runs)} runs over this period.")
 
     return insights
+
+def compute_acwr(runs, today):
+    # Acute:Chronic Workload Ratio — a standard, well-established way to flag
+    # injury risk from ramping training volume too quickly. Acute = last 7
+    # days of mileage; chronic = the weekly average over the last 28 days.
+    # Computed directly from logged runs rather than a Garmin endpoint, so
+    # there's no guessing about field names here — it's fully reliable.
+    def miles_in(days_back):
+        lo = today - timedelta(days=days_back - 1)
+        return sum(m_to_mi(r["distance"]) for r in runs if lo <= r["date"] <= today)
+    acute = miles_in(7)
+    chronic_total = miles_in(28)
+    chronic_weekly_avg = chronic_total / 4
+    if chronic_weekly_avg <= 0:
+        return None
+    return acute / chronic_weekly_avg
+
+# =====================================================================
+# Race countdown + "what should I do today" recommendation
+# =====================================================================
+def race_phase(today, race_date):
+    days_left = (race_date - today).days
+    if days_left < 0:
+        return "Post-Race", days_left
+    if days_left <= 13:
+        return "Taper", days_left
+    if days_left <= 24:
+        return "Peak", days_left
+    if days_left <= 56:
+        return "Build", days_left
+    return "Base", days_left
+
+def format_countdown(days_left):
+    if days_left < 0:
+        return "Race day has passed"
+    if days_left == 0:
+        return "Race day!"
+    weeks, rem = divmod(days_left, 7)
+    if weeks > 0 and rem > 0:
+        return f"{weeks}w {rem}d to go"
+    if weeks > 0:
+        return f"{weeks} weeks to go"
+    return f"{days_left} days to go"
+
+def build_recommendation(readiness, hrv, acwr, rhr_today, rhr_baseline, sleep_hours, phase, days_left):
+    notes = []
+    flags_caution = []
+    flags_good = []
+
+    phase_context = {
+        "Build": "You're in your build phase — a good window to gradually add mileage if recovery allows.",
+        "Peak": "You're in peak training — this is when your biggest long runs happen, so treat recovery as part of the work.",
+        "Post-Race": "Race complete — shift focus to recovery before starting your next block.",
+    }.get(phase)
+    if phase_context:
+        notes.append(phase_context)
+
+    if readiness and readiness.get("level"):
+        lvl = str(readiness["level"]).upper()
+        if lvl in ("LOW", "VERY_LOW"):
+            flags_caution.append("readiness")
+        elif lvl == "HIGH":
+            flags_good.append("readiness")
+        score_part = f" ({readiness['score']}/100)" if readiness.get("score") is not None else ""
+        notes.append(f"Training readiness: {str(readiness['level']).replace('_', ' ').title()}{score_part}.")
+
+    if hrv and hrv.get("status"):
+        st = str(hrv["status"]).upper()
+        if st in ("UNBALANCED", "LOW", "POOR"):
+            flags_caution.append("hrv")
+        elif st == "BALANCED":
+            flags_good.append("hrv")
+        notes.append(f"HRV status: {str(hrv['status']).title()}.")
+
+    if acwr is not None:
+        if acwr > 1.5:
+            flags_caution.append("load")
+            notes.append(f"Training load ratio: {acwr:.2f} — climbing faster than your body's adapted to recently.")
+        elif acwr < 0.8:
+            notes.append(f"Training load ratio: {acwr:.2f} — below your recent average.")
+        else:
+            flags_good.append("load")
+            notes.append(f"Training load ratio: {acwr:.2f} — a sustainable range.")
+
+    if isinstance(rhr_today, (int, float)) and isinstance(rhr_baseline, (int, float)) and rhr_baseline > 0:
+        delta = rhr_today - rhr_baseline
+        if delta >= 5:
+            flags_caution.append("rhr")
+            notes.append(f"Resting HR is {delta:.0f} bpm above your recent baseline — an early fatigue signal.")
+        elif delta <= -3:
+            flags_good.append("rhr")
+
+    if isinstance(sleep_hours, (int, float)) and sleep_hours < 6:
+        flags_caution.append("sleep")
+        notes.append(f"Only {sleep_hours}h of sleep last night.")
+
+    if phase == "Taper":
+        headline = "Taper mode — hold your paces, cut your volume"
+        tone = "neutral"
+        notes.insert(0, f"{days_left} days to race day: this is the time to protect freshness over adding more work.")
+    elif len(flags_caution) >= 2:
+        headline = "Lean toward an easy day or rest"
+        tone = "caution"
+    elif len(flags_caution) == 1 and not flags_good:
+        headline = "Moderate it today — listen to your body"
+        tone = "caution"
+    elif len(flags_good) >= 2 and not flags_caution:
+        headline = "Green light — good day for your scheduled quality work"
+        tone = "good"
+    else:
+        headline = "Steady as planned"
+        tone = "neutral"
+
+    if not notes:
+        notes.append("Not enough recovery data today for a detailed read — mileage and pace trends are still tracked below.")
+
+    return {"headline": headline, "notes": notes, "tone": tone}
+
+# =====================================================================
+# Parsing helpers for newer / less-certain Garmin endpoints — every one
+# of these degrades to None (never raises) if the field names don't match
+# what the account/library version actually returns.
+# =====================================================================
+def parse_readiness(raw):
+    item = raw[0] if isinstance(raw, list) and raw else (raw if isinstance(raw, dict) else None)
+    if not item:
+        return None
+    score = dig(item, "score")
+    level = dig(item, "level")
+    if score is None and level is None:
+        return None
+    return {"score": score, "level": level}
+
+def parse_hrv(raw):
+    summary = dig(raw, "hrvSummary") if isinstance(raw, dict) else None
+    if not summary and isinstance(raw, dict) and "status" in raw:
+        summary = raw
+    if not summary:
+        return None
+    last_night = dig(summary, "lastNightAvg")
+    status = dig(summary, "status")
+    if last_night is None and status is None:
+        return None
+    return {"last_night": last_night, "status": status}
+
+def parse_body_battery_now(raw):
+    day = raw[-1] if isinstance(raw, list) and raw else (raw if isinstance(raw, dict) else None)
+    if not day:
+        return None
+    values = dig(day, "bodyBatteryValuesArray", default=[]) or []
+    if values:
+        try:
+            return values[-1][1]
+        except Exception:
+            pass
+    return dig(day, "charged")
+
+def parse_score(raw):
+    if not raw:
+        return None
+    return dig(raw, "overallScore") or dig(raw, "score")
+
+def parse_race_predictions(raw):
+    if not isinstance(raw, dict):
+        return None
+    candidates = {
+        "5K": ["time5K", "raceTime5K", "predictedTime5K"],
+        "10K": ["time10K", "raceTime10K", "predictedTime10K"],
+        "Half Marathon": ["timeHalfMarathon", "raceTimeHalfMarathon", "predictedTimeHalfMarathon"],
+        "Marathon": ["timeMarathon", "raceTimeMarathon", "predictedTimeMarathon"],
+    }
+    out = {}
+    for label, keys in candidates.items():
+        val = None
+        for k in keys:
+            val = raw.get(k)
+            if val:
+                break
+        out[label] = val
+    return out if any(out.values()) else None
+
+def parse_vo2_trend(raw):
+    entries = []
+    if isinstance(raw, dict):
+        items = list(raw.items())
+    elif isinstance(raw, list):
+        items = [(dig(e, "calendarDate") or dig(e, "date"), e) for e in raw]
+    else:
+        items = []
+    for key, val in items:
+        v = None
+        if isinstance(val, list):
+            v = dig(val, 0, "generic", "vo2MaxPreciseValue") or dig(val, 0, "generic", "vo2MaxValue")
+        elif isinstance(val, dict):
+            v = dig(val, "generic", "vo2MaxPreciseValue") or dig(val, "generic", "vo2MaxValue") or dig(val, "vo2MaxPreciseValue")
+        try:
+            d = datetime.strptime(str(key)[:10], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        entries.append((d, v if isinstance(v, (int, float)) else None))
+    entries.sort(key=lambda t: t[0])
+    return entries
+
+def summarize_intensity(raw):
+    entry = raw[-1] if isinstance(raw, list) and raw else (raw if isinstance(raw, dict) else None)
+    if not entry:
+        return None
+    moderate = dig(entry, "moderateValue") or dig(entry, "moderateIntensityMinutes") or dig(entry, "moderateMinutes")
+    vigorous = dig(entry, "vigorousValue") or dig(entry, "vigorousIntensityMinutes") or dig(entry, "vigorousMinutes")
+    if moderate is None and vigorous is None:
+        return None
+    return {"moderate": moderate or 0, "vigorous": vigorous or 0}
 
 # =====================================================================
 # Rendering — small design system (shared with the Claude-artifact
@@ -306,8 +524,8 @@ def render_log(runs_desc):
         )
     return "".join(rows)
 
-def render_rhr_sparkline(values):
-    # values: list of (date, bpm) oldest -> newest, bpm may be None
+def render_sparkline(values, cls_prefix="rhr"):
+    # values: list of (date, metric) oldest -> newest, metric may be None
     pts = [(i, v) for i, (_, v) in enumerate(values) if v]
     if len(pts) < 2:
         return ""
@@ -323,8 +541,8 @@ def render_rhr_sparkline(values):
 
     poly = " ".join(f"{i*step:.1f},{y_of(v):.1f}" for i, v in pts)
     last_i, last_v = pts[-1]
-    dot = f'<circle cx="{last_i*step:.1f}" cy="{y_of(last_v):.1f}" r="2.2" class="rhr-dot"></circle>'
-    return f'<svg width="{w}" height="{h}" class="rhr-spark"><polyline points="{poly}" class="rhr-line"></polyline>{dot}</svg>'
+    dot = f'<circle cx="{last_i*step:.1f}" cy="{y_of(last_v):.1f}" r="2.2" class="{cls_prefix}-dot"></circle>'
+    return f'<svg width="{w}" height="{h}" class="{cls_prefix}-spark"><polyline points="{poly}" class="{cls_prefix}-line"></polyline>{dot}</svg>'
 
 # =====================================================================
 # Main
@@ -402,17 +620,78 @@ def main():
     if training_feedback:
         training_feedback = str(training_feedback).replace("_", " ").title()
 
-    # ---- 7-day resting HR sparkline (best-effort) ----
+    # ---- 7-day resting HR sparkline + a slightly longer recovery baseline ----
     rhr_series = []
     for i in range(RHR_TREND_DAYS - 1, -1, -1):
         d = today - timedelta(days=i)
         day_rhr = safe_call(client.get_rhr_day, str(d))
         v = dig(day_rhr, "allMetrics", "metricsMap", "WELLNESS_RESTING_HEART_RATE", 0, "value")
         rhr_series.append((d, v if isinstance(v, (int, float)) else None))
-    rhr_spark = render_rhr_sparkline(rhr_series)
+    rhr_spark = render_sparkline(rhr_series, "rhr")
+    rhr_baseline_pool = [v for d, v in rhr_series[:-1] if v is not None]
+    rhr_baseline = sum(rhr_baseline_pool) / len(rhr_baseline_pool) if rhr_baseline_pool else None
+    rhr_today_val = rhr_series[-1][1] if rhr_series else None
+
+    # ---- VO2 max trend (best-effort; falls back to a handful of sampled dates) ----
+    vo2_trend_raw = safe_method_call(client, "get_max_metrics_range", (today - timedelta(days=VO2_TREND_DAYS)).isoformat(), today.isoformat())
+    vo2_series = parse_vo2_trend(vo2_trend_raw)
+    if not vo2_series:
+        vo2_series = []
+        for d_ago in (VO2_TREND_DAYS, 56, 28, 14, 0):
+            d = today - timedelta(days=d_ago)
+            m = safe_call(client.get_max_metrics, str(d))
+            v = dig(m, 0, "generic", "vo2MaxPreciseValue") if isinstance(m, list) else None
+            vo2_series.append((d, v if isinstance(v, (int, float)) else None))
+    vo2_spark = render_sparkline(vo2_series, "vo2")
+
+    # ---- Recovery: training readiness, HRV, body battery (best-effort) ----
+    readiness = parse_readiness(safe_method_call(client, "get_training_readiness", str(today)))
+    hrv = parse_hrv(safe_method_call(client, "get_hrv_data", str(today)))
+    body_battery_now = parse_body_battery_now(safe_method_call(client, "get_body_battery", today.isoformat(), today.isoformat()))
+
+    # ---- Fitness trend: race predictions + endurance/hill scores (best-effort) ----
+    race_pred = parse_race_predictions(safe_method_call(client, "get_race_predictions"))
+    score_window_start = (today - timedelta(days=27)).isoformat()
+    endurance_score = parse_score(safe_method_call(client, "get_endurance_score", score_window_start, today.isoformat()))
+    hill_score = parse_score(safe_method_call(client, "get_hill_score", score_window_start, today.isoformat()))
+
+    # ---- Weekly intensity minutes (folded into Insights as one extra line) ----
+    intensity = summarize_intensity(safe_method_call(
+        client, "get_weekly_intensity_minutes", (today - timedelta(days=6)).isoformat(), today.isoformat()
+    ))
+    if intensity:
+        insights.append(
+            f"This week's intensity minutes: {int(intensity['moderate'])} moderate + {int(intensity['vigorous'])} vigorous "
+            f"(general guideline: 150 moderate or 75 vigorous per week)."
+        )
+
+    # ---- Race countdown + recommendation ----
+    phase, days_left = race_phase(today, RACE_DATE)
+    acwr = compute_acwr(runs_asc, today)
+    recommendation = build_recommendation(
+        readiness, hrv, acwr, rhr_today_val, rhr_baseline, sleep_hours, phase, days_left
+    )
+    countdown_str = format_countdown(days_left)
+    race_date_fmt = RACE_DATE.strftime("%B %-d, %Y")
+    rec_notes_html = "".join(f"<li>{n}</li>" for n in recommendation["notes"])
 
     insights_html = "".join(f"<li>{s}</li>" for s in insights)
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
+
+    # ---- Fitness trend section markup ----
+    def predict_row(label, seconds, highlight=False):
+        cls = "predict-row highlight" if highlight else "predict-row"
+        return f'<div class="{cls}"><span class="predict-label">{label}</span><span class="predict-time">{fmt_duration(seconds)}</span></div>'
+
+    if race_pred:
+        predict_html = (
+            predict_row("5K", race_pred.get("5K"))
+            + predict_row("10K", race_pred.get("10K"))
+            + predict_row("Half Marathon", race_pred.get("Half Marathon"), highlight=True)
+            + predict_row("Marathon", race_pred.get("Marathon"))
+        )
+    else:
+        predict_html = "<p class='empty'>Race predictions aren't available from Garmin right now.</p>"
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -450,6 +729,25 @@ h2 {{ font-family:var(--font-display); font-weight:600; font-size:0.78rem; text-
 section {{ margin-bottom:34px; }}
 .empty {{ color:var(--ink-muted); font-size:0.85rem; }}
 
+.race-card {{ background:var(--paper-raised); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:10px; padding:16px 16px 14px; }}
+.race-card.tone-good {{ border-left-color:var(--good); }}
+.race-card.tone-caution {{ border-left-color:var(--warning); }}
+.race-card.tone-neutral {{ border-left-color:var(--accent); }}
+.race-head {{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; flex-wrap:wrap; gap:6px; }}
+.race-title {{ font-family:var(--font-display); font-weight:600; font-size:0.95rem; }}
+.race-phase {{ display:inline-block; font-size:0.62rem; text-transform:uppercase; letter-spacing:0.05em; padding:2px 7px; border-radius:10px; background:var(--line); color:var(--ink-muted); margin-left:8px; }}
+.race-days {{ font-family:var(--font-mono); font-size:0.8rem; color:var(--ink-muted); }}
+.rec-headline {{ font-size:1rem; font-weight:600; margin-bottom:8px; }}
+.tone-good .rec-headline {{ color:var(--good); }}
+.tone-caution .rec-headline {{ color:var(--warning); }}
+.tone-neutral .rec-headline {{ color:var(--ink); }}
+.rec-notes {{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }}
+.rec-notes li {{ font-size:0.85rem; color:var(--ink-muted); line-height:1.4; padding-left:14px; position:relative; }}
+.rec-notes li::before {{ content:""; position:absolute; left:0; top:0.5em; width:5px; height:5px; border-radius:50%; background:var(--accent); }}
+.tone-good .rec-notes li::before {{ background:var(--good); }}
+.tone-caution .rec-notes li::before {{ background:var(--warning); }}
+.rec-disclaimer {{ font-size:0.68rem; color:var(--ink-muted); margin-top:10px; font-style:italic; }}
+
 .stat-grid {{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }}
 .stat-tile {{ background:var(--paper-raised); border:1px solid var(--line); border-radius:10px; padding:14px 14px 12px; }}
 .stat-value {{ font-family:var(--font-mono); font-size:1.7rem; font-weight:500; font-variant-numeric:tabular-nums; line-height:1.1; }}
@@ -459,6 +757,8 @@ section {{ margin-bottom:34px; }}
 .stat-tile.rhr-tile .rhr-row {{ display:flex; align-items:flex-end; justify-content:space-between; gap:8px; }}
 .rhr-line {{ fill:none; stroke:var(--good); stroke-width:1.6; }}
 .rhr-dot {{ fill:var(--good); }}
+.vo2-line {{ fill:none; stroke:var(--accent); stroke-width:1.6; }}
+.vo2-dot {{ fill:var(--accent); }}
 
 .pill {{ display:inline-flex; align-items:center; gap:5px; font-size:0.68rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; padding:3px 8px; border-radius:20px; margin-top:6px; color:var(--good); background:color-mix(in srgb, var(--good) 14%, transparent); }}
 .pill::before {{ content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }}
@@ -485,9 +785,15 @@ section {{ margin-bottom:34px; }}
 .pace-label {{ font-family:var(--font-mono); font-size:9px; fill:var(--ink-muted); }}
 .chart-caption {{ font-family:var(--font-mono); font-size:0.64rem; color:var(--ink-muted); margin-top:6px; }}
 
-.load-row {{ display:flex; gap:18px; margin-top:14px; font-family:var(--font-mono); font-size:0.78rem; flex-wrap:wrap; }}
-.load-item b {{ font-size:0.95rem; }}
-.load-item span {{ display:block; color:var(--ink-muted); font-family:var(--font-body); font-size:0.65rem; text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }}
+.predict-list {{ display:flex; flex-direction:column; gap:2px; margin-bottom:16px; }}
+.predict-row {{ display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-bottom:1px solid var(--line); font-family:var(--font-mono); font-size:0.85rem; }}
+.predict-row.highlight {{ background:color-mix(in srgb, var(--accent) 8%, transparent); border-radius:6px; font-weight:600; border-bottom-color:transparent; }}
+.predict-label {{ color:var(--ink-muted); font-family:var(--font-body); text-transform:uppercase; font-size:0.7rem; letter-spacing:0.05em; }}
+.predict-row.highlight .predict-label {{ color:var(--accent); }}
+.predict-time {{ font-variant-numeric:tabular-nums; }}
+.score-row {{ display:flex; gap:22px; }}
+.score-item b {{ font-family:var(--font-mono); font-size:1.2rem; font-variant-numeric:tabular-nums; }}
+.score-item span {{ display:block; font-family:var(--font-body); font-size:0.65rem; color:var(--ink-muted); text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }}
 
 .ladder {{ display:flex; height:30px; border-radius:6px; overflow:hidden; gap:2px; margin-bottom:14px; }}
 .seg {{ flex:0 0 var(--w); }}
@@ -524,6 +830,18 @@ footer {{ text-align:center; font-size:0.68rem; color:var(--ink-muted); margin-t
 </header>
 
 <section>
+  <div class="race-card tone-{recommendation['tone']}">
+    <div class="race-head">
+      <div class="race-title">{RACE_NAME} · {race_date_fmt}<span class="race-phase">{phase}</span></div>
+      <div class="race-days">{countdown_str}</div>
+    </div>
+    <div class="rec-headline">{recommendation['headline']}</div>
+    <ul class="rec-notes">{rec_notes_html}</ul>
+    <div class="rec-disclaimer">Generated from your Garmin metrics — not a substitute for how you actually feel or a coach's judgment.</div>
+  </div>
+</section>
+
+<section>
   <h2>Today's Snapshot</h2>
   <div class="stat-grid">
     <div class="stat-tile">
@@ -544,10 +862,35 @@ footer {{ text-align:center; font-size:0.68rem; color:var(--ink-muted); margin-t
       <div class="stat-value">{avg_stress}</div>
       <div class="stat-label">Avg Stress</div>
     </div>
+    <div class="stat-tile rhr-tile">
+      <div class="rhr-row">
+        <div>
+          <div class="stat-value">{vo2max}</div>
+          <div class="stat-label">VO2 Max</div>
+          {f'<span class="pill">{training_feedback}</span>' if training_feedback else ''}
+        </div>
+        {vo2_spark}
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Recovery</h2>
+  <div class="stat-grid">
     <div class="stat-tile">
-      <div class="stat-value">{vo2max}</div>
-      <div class="stat-label">VO2 Max</div>
-      {f'<span class="pill">{training_feedback}</span>' if training_feedback else ''}
+      <div class="stat-value">{readiness['score'] if readiness and readiness.get('score') is not None else '—'}</div>
+      <div class="stat-label">Training Readiness</div>
+      <div class="stat-sub">{str(readiness['level']).replace('_',' ').title() if readiness and readiness.get('level') else ''}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-value">{hrv['last_night'] if hrv and hrv.get('last_night') is not None else '—'}</div>
+      <div class="stat-label">HRV (ms)</div>
+      <div class="stat-sub">{str(hrv['status']).title() if hrv and hrv.get('status') else ''}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-value">{body_battery_now if body_battery_now is not None else '—'}</div>
+      <div class="stat-label">Body Battery</div>
     </div>
   </div>
 </section>
@@ -566,6 +909,15 @@ footer {{ text-align:center; font-size:0.68rem; color:var(--ink-muted); margin-t
     </div>
   </div>
   <div class="chart-caption">Bars: weekly mileage · Line: weekly average pace (higher = faster)</div>
+</section>
+
+<section>
+  <h2>Fitness Trend</h2>
+  <div class="predict-list">{predict_html}</div>
+  <div class="score-row">
+    <div class="score-item"><b>{endurance_score if endurance_score is not None else '—'}</b><span>Endurance Score</span></div>
+    <div class="score-item"><b>{hill_score if hill_score is not None else '—'}</b><span>Hill Score</span></div>
+  </div>
 </section>
 
 <section>

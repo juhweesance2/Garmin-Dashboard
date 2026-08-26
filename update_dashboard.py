@@ -570,17 +570,39 @@ def haversine_m(lat1, lon1, lat2, lon2):
     a = math.sin(d_phi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(d_lmb / 2) ** 2
     return 2 * r * math.asin(min(1, math.sqrt(a)))
 
+ELEV_BIN_MI = 0.25  # quarter-mile — the fixed resolution of the elevation trace
+
 def _finalize_elevation_profile(pts, max_points):
+    # Bins the raw altitude trace into fixed-width quarter-mile buckets, rather
+    # than just thinning out every Nth raw sample. Binning by DISTANCE (instead
+    # of by index) means each point in the resulting profile means the same
+    # thing on every run — "the average altitude across the Nth quarter mile" —
+    # regardless of how densely or unevenly Garmin happened to sample GPS/
+    # altitude that day, and averaging the raw points that fall in each bin
+    # smooths a bit of altimeter/GPS jitter along the way as a side benefit.
     pts = [(d, e) for d, e in pts if isinstance(d, (int, float)) and isinstance(e, (int, float))]
     if len(pts) < 6:
         return None
     pts.sort(key=lambda t: t[0])
-    if pts[-1][0] <= 0:
+    total_m = pts[-1][0]
+    if total_m <= 0:
         return None
-    if len(pts) > max_points:
-        step = len(pts) / max_points
-        pts = [pts[int(i * step)] for i in range(max_points)]
-    return [{"distMi": round(d * MI_PER_M, 3), "elevFt": round(e * FT_PER_M, 1)} for d, e in pts]
+    total_mi = total_m * MI_PER_M
+    n_bins = max(1, math.ceil(total_mi / ELEV_BIN_MI))
+    n_bins = min(n_bins, max_points)  # defensive cap, not a normal-use downsample
+    bucket_elevs = [[] for _ in range(n_bins)]
+    for d, e in pts:
+        idx = min(n_bins - 1, int((d * MI_PER_M) / ELEV_BIN_MI))
+        bucket_elevs[idx].append(e)
+    out = []
+    for i, elevs in enumerate(bucket_elevs):
+        if not elevs:
+            continue  # sparse data left this quarter-mile with no raw samples — skip rather than fabricate one
+        bin_center_mi = min((i + 0.5) * ELEV_BIN_MI, total_mi)
+        out.append({"distMi": round(bin_center_mi, 3), "elevFt": round(sum(elevs) / len(elevs) * FT_PER_M, 1)})
+    if len(out) < 4:
+        return None
+    return out
 
 def parse_elevation_profile(details, max_points=150):
     # A continuous altitude trace (sampled every few seconds, not once per mile) —
@@ -896,14 +918,27 @@ def main():
         laps = dig(splits_raw, "lapDTOs", default=[]) or []
         out = []
         for i, lap in enumerate(laps, start=1):
+            lap_dist_m = lap.get("distance")
             out.append({
                 "mile": i,
-                "pace": pace_min_per_mile(lap.get("distance"), lap.get("duration")) or 0,
+                "pace": pace_min_per_mile(lap_dist_m, lap.get("duration")) or 0,
                 "avgHr": lap.get("averageHR"),
                 "maxHr": lap.get("maxHR"),
                 "elevGainFt": round(m_to_ft(lap.get("elevationGain"))) if lap.get("elevationGain") is not None else 0,
                 "cadence": lap.get("averageRunningCadenceInStepsPerMinute"),
+                "_lapDistMi": m_to_mi(lap_dist_m) if lap_dist_m is not None else None,
             })
+        # Garmin auto-laps at each full mile, so the trailing lap is usually
+        # whatever distance was left when the run ended — not a completed mile.
+        # Charting or tabling it as "Mile N" both mislabels an incomplete mile as
+        # finished and (since a very short lap's pace is extremely noisy — a few
+        # seconds of GPS wobble over 0.02mi can compute as a 24:00/mi "mile")
+        # distorts the pace/HR scale for every real mile alongside it. Trailing
+        # laps under 0.9mi are dropped, as long as at least one full lap remains.
+        while len(out) > 1 and out[-1]["_lapDistMi"] is not None and out[-1]["_lapDistMi"] < 0.9:
+            out.pop()
+        for s in out:
+            s.pop("_lapDistMi", None)
         return out
 
     detail_candidates = runs_desc[:DETAIL_RUN_COUNT]
@@ -1274,6 +1309,26 @@ HTML_SHELL = r"""<!DOCTYPE html>
     <div id="modal-body"></div>
   </div>
 </div>
+<div id="chart-zoom-modal" class="modal-overlay chart-zoom-overlay" style="display:none;">
+  <div class="chart-zoom-panel">
+    <div class="chart-zoom-toolbar">
+      <span class="chart-zoom-title" id="chart-zoom-title"></span>
+      <div class="chart-zoom-controls">
+        <button type="button" id="chart-zoom-out" aria-label="Zoom out">−</button>
+        <span id="chart-zoom-level">100%</span>
+        <button type="button" id="chart-zoom-in" aria-label="Zoom in">+</button>
+        <button type="button" id="chart-zoom-reset" aria-label="Reset zoom">⟲</button>
+        <button type="button" id="chart-zoom-close" class="chart-zoom-close-btn" aria-label="Close">&times;</button>
+      </div>
+    </div>
+    <div class="chart-zoom-viewport" id="chart-zoom-viewport">
+      <div class="chart-zoom-stage" id="chart-zoom-stage">
+        <div class="chart-box" id="chart-zoom-box"><div id="chart-zoom-target" class="svg-chart"></div></div>
+      </div>
+    </div>
+    <div class="chart-zoom-hint">Scroll or pinch to zoom · drag to pan once zoomed in · double-click to reset</div>
+  </div>
+</div>
 <div id="chart-tooltip"></div>
 <script>const DATA = __DATA_JSON__;</script>
 <script>__JS__</script>
@@ -1459,6 +1514,24 @@ footer .update-note b{ color:var(--text-muted); }
 .modal-splits-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
 .modal-splits-table th{ text-align:left; font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); }
 .modal-splits-table td{ padding:8px 10px; border-bottom:1px solid var(--border-soft); font-family:var(--font-mono); }
+
+.chart-expand-btn{ position:absolute; top:8px; right:8px; width:26px; height:26px; display:flex; align-items:center; justify-content:center; background:var(--bg-raised); border:1px solid var(--border); border-radius:6px; color:var(--text-dim); font-size:13px; line-height:1; cursor:pointer; opacity:0.55; transition:opacity .15s, color .15s, border-color .15s; z-index:2; }
+.chart-expand-btn:hover, .chart-expand-btn:focus-visible{ opacity:1; color:var(--text); border-color:var(--text-dim); }
+.chart-zoom-overlay{ align-items:center; z-index:1200; }
+.chart-zoom-panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:14px; width:min(96vw,1140px); height:min(90vh,740px); padding:14px 16px 12px; display:flex; flex-direction:column; margin:0; }
+.chart-zoom-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.chart-zoom-title{ font-family:var(--font-display); font-weight:700; font-size:15px; text-wrap:balance; }
+.chart-zoom-controls{ display:flex; align-items:center; gap:6px; flex-shrink:0; }
+.chart-zoom-controls button{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:var(--bg-raised); border:1px solid var(--border); border-radius:7px; color:var(--text-muted); font-size:16px; line-height:1; cursor:pointer; }
+.chart-zoom-controls button:hover{ color:var(--text); border-color:var(--text-dim); }
+.chart-zoom-controls button.chart-zoom-close-btn{ font-size:19px; margin-left:6px; }
+#chart-zoom-level{ font-family:var(--font-mono); font-size:11px; color:var(--text-dim); min-width:38px; text-align:center; }
+.chart-zoom-viewport{ flex:1; margin-top:10px; position:relative; overflow:hidden; border:1px solid var(--border-soft); border-radius:10px; background:var(--bg-inset); touch-action:none; cursor:default; }
+.chart-zoom-viewport.pannable{ cursor:grab; }
+.chart-zoom-viewport.panning{ cursor:grabbing; }
+.chart-zoom-stage{ width:100%; height:100%; transform-origin:0 0; will-change:transform; }
+#chart-zoom-box{ width:100%; height:100%; }
+.chart-zoom-hint{ margin-top:8px; font-size:11px; color:var(--text-dim); text-align:center; }
 """
 
 JS = r"""
@@ -1507,6 +1580,165 @@ function labelIndices(n, plotWidthPx, minGapPx){
   }
   return new Set(idxs);
 }
+// labelIndices' minGapPx was previously a flat guess (34px, 26px, ...) that
+// didn't account for how wide the actual label text renders — fine for short
+// labels, but a real problem for 5-6 character date labels ("Aug 25"), where
+// two labels could sit far enough apart to pass the guessed gap yet still
+// visually collide, especially on narrow phone widths where every pixel is
+// scarcer. This measures the actual widest label in THIS chart's own font via
+// a canvas (cheap, no DOM attach needed) so the gap always matches reality.
+let _labelMeasureCtx=null;
+function widestLabelPx(strs, padPx){
+  if(!_labelMeasureCtx) _labelMeasureCtx=document.createElement('canvas').getContext('2d');
+  _labelMeasureCtx.font = "10px 'IBM Plex Mono','SF Mono','Cascadia Code',Consolas,monospace";
+  const w = Math.max(0, ...strs.map(s=>_labelMeasureCtx.measureText(String(s)).width));
+  return w + (padPx||8);
+}
+
+// --- Click-to-expand / zoom for every chart -------------------------------
+// Every chart is rendered by calling one of the renderXChart(containerId, ...)
+// functions above, and those functions size themselves from whatever element
+// containerId points at (see chartSize()). That means the SAME render call
+// can be replayed into a different, larger container to get a bigger version
+// of the exact chart already on screen — no separate "zoom" chart type needed.
+// registerChart() remembers how to replay a chart (its render fn + args) keyed
+// by its normal container id, so the expand button can ask for a fresh, larger
+// render on demand rather than trying to CSS-scale the small original (which
+// would just blow up the same small SVG and blur it).
+const CHART_REGISTRY = {};
+function registerChart(containerId, title, renderFn, ...args){
+  CHART_REGISTRY[containerId] = { title, render: (targetId) => renderFn(targetId, ...args) };
+  renderFn(containerId, ...args);
+}
+
+function attachChartExpandButtons(root){
+  (root || document).querySelectorAll('.chart-box').forEach(box => {
+    if(box.id === 'chart-zoom-box') return; // the zoom viewer's own chart box
+    if(box.querySelector('.chart-expand-btn')) return; // already wired up
+    const svgDiv = box.querySelector('.svg-chart');
+    if(!svgDiv || !svgDiv.id) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chart-expand-btn';
+    btn.title = 'Expand & zoom';
+    btn.setAttribute('aria-label', 'Expand chart for a larger, zoomable view');
+    btn.innerHTML = '⤢';
+    btn.addEventListener('click', e => { e.stopPropagation(); openChartZoom(svgDiv.id); });
+    box.appendChild(btn);
+  });
+}
+
+let ZOOM = { scale:1, x:0, y:0, chartId:null };
+function chartZoomEls(){
+  return {
+    modal: document.getElementById('chart-zoom-modal'),
+    viewport: document.getElementById('chart-zoom-viewport'),
+    stage: document.getElementById('chart-zoom-stage'),
+    title: document.getElementById('chart-zoom-title'),
+    level: document.getElementById('chart-zoom-level'),
+  };
+}
+function clampZoomScale(s){ return Math.min(6, Math.max(1, s)); }
+function applyZoomTransform(){
+  const {viewport, stage, level} = chartZoomEls();
+  stage.style.transform = `translate(${ZOOM.x}px, ${ZOOM.y}px) scale(${ZOOM.scale})`;
+  level.textContent = Math.round(ZOOM.scale*100) + '%';
+  viewport.classList.toggle('pannable', ZOOM.scale > 1);
+}
+function resetZoom(){ ZOOM.scale=1; ZOOM.x=0; ZOOM.y=0; applyZoomTransform(); }
+function zoomBy(factor, aroundVpX, aroundVpY){
+  const {viewport} = chartZoomEls();
+  const rect = viewport.getBoundingClientRect();
+  const cx = aroundVpX!=null ? aroundVpX : rect.width/2;
+  const cy = aroundVpY!=null ? aroundVpY : rect.height/2;
+  const prevScale = ZOOM.scale;
+  const newScale = clampZoomScale(prevScale*factor);
+  const sx = (cx - ZOOM.x)/prevScale, sy = (cy - ZOOM.y)/prevScale;
+  ZOOM.x = cx - sx*newScale; ZOOM.y = cy - sy*newScale; ZOOM.scale = newScale;
+  applyZoomTransform();
+}
+function openChartZoom(chartId){
+  const entry = CHART_REGISTRY[chartId];
+  if(!entry) return;
+  const {modal, title} = chartZoomEls();
+  title.textContent = entry.title || '';
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  ZOOM = { scale:1, x:0, y:0, chartId };
+  applyZoomTransform();
+  // Render on the next couple of frames so the modal has finished laying out
+  // and chart-zoom-target has its real (large) size before the chart measures it.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const container = document.getElementById('chart-zoom-target');
+    if(container) container.innerHTML = '';
+    entry.render('chart-zoom-target');
+  }));
+}
+function closeChartZoom(){
+  document.getElementById('chart-zoom-modal').style.display = 'none';
+  document.body.style.overflow = '';
+  ZOOM.chartId = null;
+}
+safe('chart zoom modal', function(){
+  const {modal, viewport} = chartZoomEls();
+  document.getElementById('chart-zoom-close').addEventListener('click', closeChartZoom);
+  document.getElementById('chart-zoom-in').addEventListener('click', () => zoomBy(1.5));
+  document.getElementById('chart-zoom-out').addEventListener('click', () => zoomBy(1/1.5));
+  document.getElementById('chart-zoom-reset').addEventListener('click', resetZoom);
+  modal.addEventListener('click', e => { if(e.target===modal) closeChartZoom(); });
+  document.addEventListener('keydown', e => { if(e.key==='Escape' && modal.style.display!=='none') closeChartZoom(); });
+  viewport.addEventListener('dblclick', resetZoom);
+
+  viewport.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = viewport.getBoundingClientRect();
+    zoomBy(Math.pow(1.0016, -e.deltaY), e.clientX-rect.left, e.clientY-rect.top);
+  }, {passive:false});
+
+  let dragging=false, dragStart={x:0,y:0}, panOrigin={x:0,y:0};
+  viewport.addEventListener('mousedown', e => {
+    if(ZOOM.scale<=1) return;
+    dragging=true; dragStart={x:e.clientX,y:e.clientY}; panOrigin={x:ZOOM.x,y:ZOOM.y};
+    viewport.classList.add('panning');
+  });
+  window.addEventListener('mousemove', e => {
+    if(!dragging) return;
+    ZOOM.x = panOrigin.x + (e.clientX-dragStart.x);
+    ZOOM.y = panOrigin.y + (e.clientY-dragStart.y);
+    applyZoomTransform();
+  });
+  window.addEventListener('mouseup', () => { dragging=false; viewport.classList.remove('panning'); });
+
+  let touchState=null;
+  viewport.addEventListener('touchstart', e => {
+    if(e.touches.length===2){
+      const [a,b]=e.touches;
+      touchState={ mode:'pinch', dist:Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY), scale:ZOOM.scale, mid:{x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2}, origin:{x:ZOOM.x,y:ZOOM.y} };
+    } else if(e.touches.length===1 && ZOOM.scale>1){
+      touchState={ mode:'pan', start:{x:e.touches[0].clientX,y:e.touches[0].clientY}, origin:{x:ZOOM.x,y:ZOOM.y} };
+    }
+  }, {passive:true});
+  viewport.addEventListener('touchmove', e => {
+    if(!touchState) return;
+    if(touchState.mode==='pinch' && e.touches.length===2){
+      e.preventDefault();
+      const [a,b]=e.touches;
+      const dist=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);
+      const newScale=clampZoomScale(touchState.scale*(dist/touchState.dist));
+      const rect=viewport.getBoundingClientRect();
+      const cx=touchState.mid.x-rect.left, cy=touchState.mid.y-rect.top;
+      const sx=(cx-touchState.origin.x)/touchState.scale, sy=(cy-touchState.origin.y)/touchState.scale;
+      ZOOM.x=cx-sx*newScale; ZOOM.y=cy-sy*newScale; ZOOM.scale=newScale;
+      applyZoomTransform();
+    } else if(touchState.mode==='pan' && e.touches.length===1){
+      e.preventDefault();
+      ZOOM.x = touchState.origin.x + (e.touches[0].clientX-touchState.start.x);
+      ZOOM.y = touchState.origin.y + (e.touches[0].clientY-touchState.start.y);
+      applyZoomTransform();
+    }
+  }, {passive:false});
+  viewport.addEventListener('touchend', () => { touchState=null; });
+});
 
 function renderVolumeChart(containerId, weekly){
   const container=document.getElementById(containerId); container.innerHTML='';
@@ -1520,7 +1752,7 @@ function renderVolumeChart(containerId, weekly){
   const runsMax=Math.max(6,...weekly.map(w=>w.runs));
   const y1Scale=v=>M.top+plotH-(v/runsMax)*plotH;
   const n=weekly.length, bandW=plotW/n, xCenter=i=>M.left+bandW*i+bandW/2;
-  const volLabels=labelIndices(n, plotW, 34);
+  const volLabels=labelIndices(n, plotW, widestLabelPx(weekly.map(w=>w.label)));
   yTicks.forEach(t=>{ svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:yScale(t),y2:yScale(t)})); const lbl=el('text',{x:M.left-8,y:yScale(t)+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
   const yTitle=el('text',{x:10,y:12}); yTitle.textContent='miles'; svg.appendChild(yTitle);
   const y1Title=el('text',{x:W-M.right,y:12,'text-anchor':'end'}); y1Title.textContent='runs/wk'; svg.appendChild(y1Title);
@@ -1558,7 +1790,7 @@ function renderPlanChart(containerId, planWeeks){
   const yTicks=niceTicks(0,maxMiles,5), yMax=yTicks[yTicks.length-1];
   const yScale=v=>M.top+plotH-(v/yMax)*plotH;
   const n=planWeeks.length, bandW=plotW/n, xCenter=i=>M.left+bandW*i+bandW/2;
-  const wkLabels=labelIndices(n, plotW, 34);
+  const wkLabels=labelIndices(n, plotW, widestLabelPx(planWeeks.map(w=>w.weekLabel)));
   yTicks.forEach(t=>{ svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:yScale(t),y2:yScale(t)})); const lbl=el('text',{x:M.left-8,y:yScale(t)+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
   const yTitle=el('text',{x:10,y:12}); yTitle.textContent='miles'; svg.appendChild(yTitle);
   const plannedBarW=bandW*0.34, actualBarW=bandW*0.34;
@@ -1598,7 +1830,7 @@ function renderPaceChart(containerId, runsAsc){
   const n=runs.length, xScale=i=>n<=1?M.left+plotW/2:M.left+(i/(n-1))*plotW;
   yTicks.forEach(t=>{ const y=yScale(t); svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-8,y:y+3,'text-anchor':'end'}); lbl.textContent=paceStr(t); svg.appendChild(lbl); });
   const yTitle=el('text',{x:6,y:12}); yTitle.textContent='min/mile'; svg.appendChild(yTitle);
-  const paceLabels=labelIndices(n, plotW, 34);
+  const paceLabels=labelIndices(n, plotW, widestLabelPx(runs.map(r=>r.dateLabel)));
   runs.forEach((r,i)=>{ if(paceLabels.has(i)){ const xl=el('text',{x:xScale(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=r.dateLabel; svg.appendChild(xl); } });
   let path=''; runs.forEach((r,i)=>{ path+=(i===0?'M':'L')+xScale(i)+','+yScale(rolling[i])+' '; });
   svg.appendChild(el('path',{d:path.trim(),fill:'none',stroke:'#e7e9ec','stroke-width':1.5,'stroke-dasharray':'4,3'}));
@@ -1621,7 +1853,7 @@ function renderSeriesChart(containerId, series, valueKey, color){
   const yScale=v=>M.top+plotH-((v-yMin)/(yMax-yMin))*plotH;
   const n=pts.length, xScale=i=>n<=1?M.left+plotW/2:M.left+(i/(n-1))*plotW;
   yTicks.forEach(t=>{ const y=yScale(t); svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-6,y:y+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
-  const seriesLabels=labelIndices(n, plotW, 40);
+  const seriesLabels=labelIndices(n, plotW, widestLabelPx(pts.map(p=>fmtDate(p.date))));
   pts.forEach((p,i)=>{ if(seriesLabels.has(i)){ const xl=el('text',{x:xScale(i),y:H-M.bottom+14,'text-anchor':'middle'}); xl.textContent=fmtDate(p.date); svg.appendChild(xl); } });
   let linePath='', areaPath='';
   pts.forEach((p,i)=>{ const x=xScale(i), y=yScale(p[valueKey]); linePath+=(i===0?'M':'L')+x+','+y+' '; areaPath+=(i===0?'M':'L')+x+','+y+' '; });
@@ -1646,7 +1878,7 @@ function renderSplitsChart(containerId, splits, legendId, elevProfile){
   // use — xCenter(i) is just distScale at the middle of mile i, unchanged from before.
   const distScale=d=>M.left+(d/n)*plotW;
   const xCenter=i=>distScale(i+0.5);
-  const mileLabels=labelIndices(n, plotW, 26);
+  const mileLabels=labelIndices(n, plotW, widestLabelPx(splits.map(s=>'Mi '+s.mile)));
   const paces=splits.map(s=>s.pace).filter(p=>p>0);
   const paceMin=Math.min(...paces)-0.4, paceMax=Math.max(...paces)+0.4;
   const paceTop=M.top, paceBottom=M.top+plotH;
@@ -1742,14 +1974,18 @@ function renderRouteMap(containerId, points){
 // devtools panel toggling) instead of only getting it right on first paint.
 let RUNS_ASC=null, ACTIVE_SPLIT_ID=null;
 function redrawCharts(){
-  safe('redraw volume', ()=>renderVolumeChart('chart-volume', DATA.weekly));
-  safe('redraw plan', ()=>renderPlanChart('chart-plan', DATA.planComparison));
-  safe('redraw pace', ()=>{ if(RUNS_ASC) renderPaceChart('chart-pace', RUNS_ASC); });
-  safe('redraw hrv', ()=>renderSeriesChart('chart-hrv', DATA.hrv, 'hrv', '#5fa8a0'));
-  safe('redraw vo2', ()=>renderSeriesChart('chart-vo2', DATA.vo2max, 'vo2', '#e3a857'));
-  safe('redraw efficiency', ()=>renderSeriesChart('chart-efficiency', DATA.efficiencyTrend, 'ef', '#5fa8a0'));
-  safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]) renderSplitsChart('chart-splits', DATA.longRuns[ACTIVE_SPLIT_ID].splits, 'splits-legend', DATA.longRuns[ACTIVE_SPLIT_ID].elevProfile); });
+  safe('redraw volume', ()=>registerChart('chart-volume', 'Weekly Volume & Training Load', renderVolumeChart, DATA.weekly));
+  safe('redraw plan', ()=>registerChart('chart-plan', 'Plan vs. Actual', renderPlanChart, DATA.planComparison));
+  safe('redraw pace', ()=>{ if(RUNS_ASC) registerChart('chart-pace', 'Pace Progression', renderPaceChart, RUNS_ASC); });
+  safe('redraw hrv', ()=>registerChart('chart-hrv', 'HRV Trend', renderSeriesChart, DATA.hrv, 'hrv', '#5fa8a0'));
+  safe('redraw vo2', ()=>registerChart('chart-vo2', 'VO2 Max Trend', renderSeriesChart, DATA.vo2max, 'vo2', '#e3a857'));
+  safe('redraw efficiency', ()=>registerChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', renderSeriesChart, DATA.efficiencyTrend, 'ef', '#5fa8a0'));
+  safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]){ const lr=DATA.longRuns[ACTIVE_SPLIT_ID]; registerChart('chart-splits', `Long Run Splits — ${lr.label}`, renderSplitsChart, lr.splits, 'splits-legend', lr.elevProfile); } });
   Object.values(ROUTE_MAP_INSTANCES).forEach(m=>{ try{ m.invalidateSize(); }catch(e){} });
+  if(ZOOM.chartId && CHART_REGISTRY[ZOOM.chartId] && document.getElementById('chart-zoom-modal').style.display!=='none'){
+    resetZoom();
+    CHART_REGISTRY[ZOOM.chartId].render('chart-zoom-target');
+  }
 }
 let _resizeTimer;
 window.addEventListener('resize', ()=>{ clearTimeout(_resizeTimer); _resizeTimer=setTimeout(redrawCharts, 180); });
@@ -1806,11 +2042,11 @@ safe('recommendation panel', function(){
   `;
 });
 
-safe('weekly volume chart', function(){ renderVolumeChart('chart-volume', DATA.weekly); });
+safe('weekly volume chart', function(){ registerChart('chart-volume', 'Weekly Volume & Training Load', renderVolumeChart, DATA.weekly); });
 
 safe('plan vs actual', function(){
   const plan = DATA.planComparison || [];
-  renderPlanChart('chart-plan', plan);
+  registerChart('chart-plan', 'Plan vs. Actual', renderPlanChart, plan);
   const STATUS_BADGE = { 'on-track':'good', 'behind':'moderate', 'well-behind':'low-warn', 'upcoming':'upcoming', 'no-data':'no-data' };
   const STATUS_LABEL = { 'on-track':'On Track', 'behind':'Behind', 'well-behind':'Well Behind', 'upcoming':'Upcoming', 'no-data':'No Data' };
   document.getElementById('plan-table-body').innerHTML = plan.map(w=>{
@@ -1834,7 +2070,7 @@ safe('plan vs actual', function(){
 safe('pace progression chart', function(){
   const runsAsc = [...DATA.runs].sort((a,b)=> new Date(a.date)-new Date(b.date));
   RUNS_ASC = runsAsc;
-  renderPaceChart('chart-pace', runsAsc);
+  registerChart('chart-pace', 'Pace Progression', renderPaceChart, runsAsc);
   const types = [...new Set(DATA.runs.map(r=>r.type))];
   document.getElementById('pace-legend').innerHTML = types.map(t=>`<div class="legend-item"><span class="legend-swatch" style="background:${TYPE_COLORS[t]}"></span>${t}</div>`).join('') + `<div class="legend-item"><span class="legend-swatch" style="background:#e7e9ec"></span>5-run rolling avg</div>`;
 });
@@ -1853,7 +2089,7 @@ safe('recovery panel', function(){
   document.getElementById('readiness-badge').outerHTML = `<span class="badge ${levelClass}" id="readiness-badge">${level ? level.replace(/_/g,' ') : '—'}</span>`;
   document.getElementById('training-status-badge').textContent = DATA.trainingStatusFeedback || '—';
   document.getElementById('training-acwr').textContent = DATA.acwr!=null ? `ACWR ${DATA.acwr.toFixed(2)}` : '';
-  renderSeriesChart('chart-hrv', DATA.hrv, 'hrv', '#5fa8a0');
+  registerChart('chart-hrv', 'HRV Trend', renderSeriesChart, DATA.hrv, 'hrv', '#5fa8a0');
   const mix = DATA.loadMix;
   if(mix){
     const rows = [
@@ -1885,8 +2121,8 @@ safe('fitness trend', function(){
     <div class="score-item"><b>${DATA.enduranceScore!=null?DATA.enduranceScore:'—'}</b><span>Endurance Score</span></div>
     <div class="score-item"><b>${DATA.hillScore!=null?DATA.hillScore:'—'}</b><span>Hill Score</span></div>
   `;
-  renderSeriesChart('chart-vo2', DATA.vo2max, 'vo2', '#e3a857');
-  renderSeriesChart('chart-efficiency', DATA.efficiencyTrend, 'ef', '#5fa8a0');
+  registerChart('chart-vo2', 'VO2 Max Trend', renderSeriesChart, DATA.vo2max, 'vo2', '#e3a857');
+  registerChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', renderSeriesChart, DATA.efficiencyTrend, 'ef', '#5fa8a0');
 });
 
 safe('long run splits', function(){
@@ -1910,7 +2146,7 @@ safe('long run splits', function(){
       <div class="split-meta-item"><div class="stat-label">Elev Gain</div><div class="val">${totalGain} ft</div></div>
       <div class="split-meta-item"><div class="stat-label">Fastest / Slowest Mile</div><div class="val">${fastest?paceStr(fastest.pace):'—'} → ${slowest?paceStr(slowest.pace):'—'}</div></div>
     `;
-    renderSplitsChart('chart-splits', lr.splits, 'splits-legend', lr.elevProfile);
+    registerChart('chart-splits', `Long Run Splits — ${lr.label}`, renderSplitsChart, lr.splits, 'splits-legend', lr.elevProfile);
   }
   document.getElementById('split-tabs').innerHTML = ids.map(id=>`<button class="tab-btn" data-id="${id}">${longRuns[id].label}</button>`).join('');
   document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>renderSplit(b.dataset.id)));
@@ -1999,9 +2235,12 @@ safe('run detail modal', function(){
     modal.style.display='flex';
     document.body.style.overflow='hidden';
     if(route && route.length>1) renderRouteMap('modal-route', route);
-    if(splits.length) renderSplitsChart('modal-splits-chart', splits, 'modal-splits-legend', elevProfile);
+    if(splits.length) registerChart('modal-splits-chart', `Mile Splits — ${run.name}`, renderSplitsChart, splits, 'modal-splits-legend', elevProfile);
+    attachChartExpandButtons(body);
   };
 });
+
+safe('chart expand buttons', function(){ attachChartExpandButtons(document); });
 """
 
 if __name__ == "__main__":

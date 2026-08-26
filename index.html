@@ -4,197 +4,176 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Training Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-  body { font-family: -apple-system, sans-serif; margin: 20px; background: #fafafa; color: #222; }
-  h1 { font-size: 1.4em; }
-  h2 { font-size: 1.1em; margin-top: 2em; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-  table { border-collapse: collapse; width: 100%; margin-top: 8px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 0.9em; }
-  .metric-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
-  .metric-box { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; min-width: 120px; }
-  .metric-box .value { font-size: 1.4em; font-weight: 600; }
-  .metric-box .label { font-size: 0.8em; color: #777; }
-  .updated { color: #888; font-size: 0.8em; margin-top: 4px; }
+:root {
+  --paper: #EFF1EC; --paper-raised: #FBFCFA; --ink: #1B2420; --ink-muted: #5B655F;
+  --line: rgba(27,36,32,0.12); --accent: #B0501F;
+  --good: #15876F; --warning: #B8862A; --critical: #B23B33;
+  --seq-0: #DCEAE1; --seq-1: #B8D8C6; --seq-2: #8CC0A6; --seq-3: #54A17E; --seq-4: #1F8955;
+  --font-display: 'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif;
+  --font-body: 'IBM Plex Sans', -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #141B18; --paper-raised: #1C2420; --ink: #E7ECE7; --ink-muted: #93A199;
+    --line: rgba(231,236,231,0.14); --accent: #D9814F;
+    --good: #29A37A; --warning: #C99A2C; --critical: #D3554C;
+    --seq-0: #1E2B25; --seq-1: #2A4536; --seq-2: #3B6B4F; --seq-3: #4F9670; --seq-4: #6FC79B;
+  }
+}
+* { box-sizing: border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--font-body); padding:0 0 48px; -webkit-font-smoothing:antialiased; }
+.wrap { max-width:680px; margin:0 auto; padding:20px 16px 0; }
+header.top { display:flex; justify-content:space-between; align-items:baseline; padding:4px 2px 18px; border-bottom:1px solid var(--line); margin-bottom:22px; }
+h1 { font-family:var(--font-display); font-weight:700; font-size:1.5rem; margin:0; text-wrap:balance; }
+.updated { font-family:var(--font-mono); font-size:0.7rem; color:var(--ink-muted); text-align:right; }
+h2 { font-family:var(--font-display); font-weight:600; font-size:0.78rem; text-transform:uppercase; letter-spacing:0.09em; color:var(--ink-muted); margin:0 0 12px; }
+section { margin-bottom:34px; }
+.empty { color:var(--ink-muted); font-size:0.85rem; }
+
+.stat-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+.stat-tile { background:var(--paper-raised); border:1px solid var(--line); border-radius:10px; padding:14px 14px 12px; }
+.stat-value { font-family:var(--font-mono); font-size:1.7rem; font-weight:500; font-variant-numeric:tabular-nums; line-height:1.1; }
+.stat-label { font-size:0.72rem; color:var(--ink-muted); margin-top:4px; text-transform:uppercase; letter-spacing:0.06em; }
+.stat-sub { font-size:0.72rem; color:var(--ink-muted); margin-top:2px; }
+.stat-tile.rhr-tile { display:flex; flex-direction:column; }
+.stat-tile.rhr-tile .rhr-row { display:flex; align-items:flex-end; justify-content:space-between; gap:8px; }
+.rhr-line { fill:none; stroke:var(--good); stroke-width:1.6; }
+.rhr-dot { fill:var(--good); }
+
+.pill { display:inline-flex; align-items:center; gap:5px; font-size:0.68rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; padding:3px 8px; border-radius:20px; margin-top:6px; color:var(--good); background:color-mix(in srgb, var(--good) 14%, transparent); }
+.pill::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+
+.insights { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:9px; }
+.insights li { position:relative; padding-left:16px; font-size:0.88rem; line-height:1.45; }
+.insights li::before { content:""; position:absolute; left:0; top:0.55em; width:6px; height:6px; border-radius:50%; background:var(--accent); }
+
+.vol-scroll { overflow-x:auto; padding-bottom:6px; }
+.chart-stack { display:flex; flex-direction:column; gap:2px; width:max-content; }
+.vol-chart { display:flex; align-items:flex-end; gap:6px; height:110px; padding:0 2px; }
+.vol-bar { width:22px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; flex-shrink:0; }
+.vol-bar-fill { width:100%; height:var(--h); border-radius:3px 3px 1px 1px; }
+.vol-step-0 { background:var(--seq-0); }
+.vol-step-1 { background:var(--seq-1); }
+.vol-step-2 { background:var(--seq-2); }
+.vol-step-3 { background:var(--seq-3); }
+.vol-step-4 { background:var(--seq-4); }
+.vol-bar-label { font-family:var(--font-mono); font-size:0.56rem; color:var(--ink-muted); margin-top:5px; }
+.pace-svg { display:block; }
+.pace-line { fill:none; stroke:var(--accent); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.pace-area { fill:color-mix(in srgb, var(--accent) 10%, transparent); stroke:none; }
+.pace-dot { fill:var(--paper-raised); stroke:var(--accent); stroke-width:1.6; }
+.pace-label { font-family:var(--font-mono); font-size:9px; fill:var(--ink-muted); }
+.chart-caption { font-family:var(--font-mono); font-size:0.64rem; color:var(--ink-muted); margin-top:6px; }
+
+.load-row { display:flex; gap:18px; margin-top:14px; font-family:var(--font-mono); font-size:0.78rem; flex-wrap:wrap; }
+.load-item b { font-size:0.95rem; }
+.load-item span { display:block; color:var(--ink-muted); font-family:var(--font-body); font-size:0.65rem; text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }
+
+.ladder { display:flex; height:30px; border-radius:6px; overflow:hidden; gap:2px; margin-bottom:14px; }
+.seg { flex:0 0 var(--w); }
+.seg-active { background:var(--accent); }
+.seg-recovery { background:var(--ink-muted); opacity:0.35; }
+.seg-neutral { background:var(--ink-muted); opacity:0.18; }
+
+.lap-row { display:grid; grid-template-columns:20px 76px 1fr 1fr 1fr; align-items:center; gap:8px; padding:7px 2px; border-bottom:1px solid var(--line); font-family:var(--font-mono); font-size:0.8rem; }
+.lap-n { color:var(--ink-muted); }
+.lap-tag { font-family:var(--font-body); font-size:0.62rem; text-transform:uppercase; letter-spacing:0.04em; padding:2px 6px; border-radius:4px; text-align:center; background:var(--line); color:var(--ink-muted); }
+.tag-active { background:color-mix(in srgb, var(--accent) 18%, transparent); color:var(--accent); }
+.lap-dist, .lap-pace, .lap-hr { text-align:right; font-variant-numeric:tabular-nums; }
+
+.run-summary { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+.run-summary .name { font-family:var(--font-display); font-weight:600; font-size:1rem; }
+.run-summary .meta { font-family:var(--font-mono); font-size:0.78rem; color:var(--ink-muted); }
+
+.log-month { font-family:var(--font-display); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--ink-muted); margin:18px 0 6px; padding-top:4px; }
+.log-month:first-child { margin-top:0; }
+.log-row { padding:9px 0; border-bottom:1px solid var(--line); }
+.log-date { font-family:var(--font-mono); font-size:0.68rem; color:var(--ink-muted); text-transform:uppercase; }
+.log-name { font-size:0.92rem; margin:2px 0 5px; }
+.log-stats { display:flex; gap:14px; font-family:var(--font-mono); font-size:0.76rem; color:var(--ink-muted); flex-wrap:wrap; }
+.log-stats b { color:var(--ink); font-weight:500; }
+
+footer { text-align:center; font-size:0.68rem; color:var(--ink-muted); margin-top:30px; font-family:var(--font-mono); }
 </style>
 </head>
 <body>
-<h1>Training Dashboard</h1>
-<div class="updated">Last updated: 2026-08-26 05:41 UTC</div>
+<div class="wrap">
+<header class="top">
+  <h1>Training Dashboard</h1>
+  <div class="updated">Updated<br>2026-08-26 06:14 UTC</div>
+</header>
 
-<h2>Today's Health Snapshot</h2>
-<div class="metric-row">
-  <div class="metric-box"><div class="value">None</div><div class="label">Sleep (hrs)</div></div>
-  <div class="metric-box"><div class="value">—</div><div class="label">Resting HR</div></div>
-  <div class="metric-box"><div class="value">None</div><div class="label">Avg Stress</div></div>
-  <div class="metric-box"><div class="value">—</div><div class="label">VO2 Max</div></div>
+<section>
+  <h2>Today's Snapshot</h2>
+  <div class="stat-grid">
+    <div class="stat-tile">
+      <div class="stat-value">—<span style="font-size:0.9rem;color:var(--ink-muted)">h</span></div>
+      <div class="stat-label">Sleep</div>
+    </div>
+    <div class="stat-tile rhr-tile">
+      <div class="rhr-row">
+        <div>
+          <div class="stat-value">—</div>
+          <div class="stat-label">Resting HR</div>
+        </div>
+        <svg width="90" height="28" class="rhr-spark"><polyline points="0.0,14.9 15.0,4.0 30.0,18.5 45.0,11.3 60.0,24.0 75.0,18.5" class="rhr-line"></polyline><circle cx="75.0" cy="18.5" r="2.2" class="rhr-dot"></circle></svg>
+      </div>
+      <div class="stat-sub">last 7 days</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-value">None</div>
+      <div class="stat-label">Avg Stress</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-value">—</div>
+      <div class="stat-label">VO2 Max</div>
+      
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Insights</h2>
+  <ul class="insights"><li>Last week's mileage (8.4 mi) is 44% down vs the trailing 4-week average (15.0 mi).</li><li>Your last 4 weeks have averaged 24 sec/mi slower than the 4 weeks before that.</li><li>Longest run in this period: 7.18 mi (Bellevue - Run, Aug 22).</li><li>You ran in 12 of the last 12 weeks.</li><li>Total distance: 191.2 mi across 63 runs over this period.</li></ul>
+</section>
+
+<section>
+  <h2>Training Load · last 23 weeks</h2>
+  <div class="vol-scroll">
+    <div class="chart-stack">
+      <div class="vol-chart" style="width:644px"><div class="vol-bar" style="--h:26px" title="Week of 2026-03-02: 4.1 mi over 2 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">3/2</span></div><div class="vol-bar" style="--h:30px" title="Week of 2026-03-09: 4.8 mi over 2 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">3/9</span></div><div class="vol-bar" style="--h:27px" title="Week of 2026-03-23: 4.3 mi over 2 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">3/23</span></div><div class="vol-bar" style="--h:39px" title="Week of 2026-03-30: 6.2 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">3/30</span></div><div class="vol-bar" style="--h:42px" title="Week of 2026-04-06: 6.8 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">4/6</span></div><div class="vol-bar" style="--h:47px" title="Week of 2026-04-13: 7.5 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">4/13</span></div><div class="vol-bar" style="--h:36px" title="Week of 2026-04-20: 5.7 mi over 3 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">4/20</span></div><div class="vol-bar" style="--h:49px" title="Week of 2026-04-27: 7.8 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">4/27</span></div><div class="vol-bar" style="--h:51px" title="Week of 2026-05-04: 8.2 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">5/4</span></div><div class="vol-bar" style="--h:38px" title="Week of 2026-05-11: 6.1 mi over 2 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">5/11</span></div><div class="vol-bar" style="--h:47px" title="Week of 2026-05-18: 7.5 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">5/18</span></div><div class="vol-bar" style="--h:41px" title="Week of 2026-06-01: 6.6 mi over 2 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">6/1</span></div><div class="vol-bar" style="--h:35px" title="Week of 2026-06-08: 5.6 mi over 2 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">6/8</span></div><div class="vol-bar" style="--h:44px" title="Week of 2026-06-22: 7.1 mi over 2 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">6/22</span></div><div class="vol-bar" style="--h:36px" title="Week of 2026-06-29: 5.7 mi over 2 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">6/29</span></div><div class="vol-bar" style="--h:62px" title="Week of 2026-07-06: 10.0 mi over 4 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">7/6</span></div><div class="vol-bar" style="--h:81px" title="Week of 2026-07-13: 13.1 mi over 4 run(s)"><div class="vol-bar-fill vol-step-3"></div><span class="vol-bar-label">7/13</span></div><div class="vol-bar" style="--h:91px" title="Week of 2026-07-20: 14.6 mi over 4 run(s)"><div class="vol-bar-fill vol-step-4"></div><span class="vol-bar-label">7/20</span></div><div class="vol-bar" style="--h:93px" title="Week of 2026-07-27: 15.0 mi over 4 run(s)"><div class="vol-bar-fill vol-step-4"></div><span class="vol-bar-label">7/27</span></div><div class="vol-bar" style="--h:100px" title="Week of 2026-08-03: 16.1 mi over 4 run(s)"><div class="vol-bar-fill vol-step-4"></div><span class="vol-bar-label">8/3</span></div><div class="vol-bar" style="--h:89px" title="Week of 2026-08-10: 14.3 mi over 3 run(s)"><div class="vol-bar-fill vol-step-4"></div><span class="vol-bar-label">8/10</span></div><div class="vol-bar" style="--h:52px" title="Week of 2026-08-17: 8.4 mi over 2 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">8/17</span></div><div class="vol-bar" style="--h:34px" title="Week of 2026-08-24: 5.5 mi over 1 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">8/24</span></div></div>
+      <svg width="644" height="70" class="pace-svg"><path d="M14.0,54 L14.0,35.9 L42.0,46.6 L70.0,16.7 L98.0,30.6 L126.0,21.8 L154.0,19.1 L182.0,17.6 L210.0,24.0 L238.0,22.5 L266.0,30.8 L294.0,14.6 L322.0,29.0 L350.0,14.0 L378.0,20.5 L406.0,43.9 L434.0,31.3 L462.0,22.8 L490.0,33.2 L518.0,37.9 L546.0,30.7 L574.0,30.6 L602.0,54.0 L630.0,40.7 L630.0,54 Z" class="pace-area"></path><polyline points="14.0,35.9 42.0,46.6 70.0,16.7 98.0,30.6 126.0,21.8 154.0,19.1 182.0,17.6 210.0,24.0 238.0,22.5 266.0,30.8 294.0,14.6 322.0,29.0 350.0,14.0 378.0,20.5 406.0,43.9 434.0,31.3 462.0,22.8 490.0,33.2 518.0,37.9 546.0,30.7 574.0,30.6 602.0,54.0 630.0,40.7" class="pace-line"></polyline><circle cx="14.0" cy="35.9" r="2.6" class="pace-dot"></circle><circle cx="42.0" cy="46.6" r="2.6" class="pace-dot"></circle><circle cx="70.0" cy="16.7" r="2.6" class="pace-dot"></circle><circle cx="98.0" cy="30.6" r="2.6" class="pace-dot"></circle><circle cx="126.0" cy="21.8" r="2.6" class="pace-dot"></circle><circle cx="154.0" cy="19.1" r="2.6" class="pace-dot"></circle><circle cx="182.0" cy="17.6" r="2.6" class="pace-dot"></circle><circle cx="210.0" cy="24.0" r="2.6" class="pace-dot"></circle><circle cx="238.0" cy="22.5" r="2.6" class="pace-dot"></circle><circle cx="266.0" cy="30.8" r="2.6" class="pace-dot"></circle><circle cx="294.0" cy="14.6" r="2.6" class="pace-dot"></circle><circle cx="322.0" cy="29.0" r="2.6" class="pace-dot"></circle><circle cx="350.0" cy="14.0" r="2.6" class="pace-dot"></circle><circle cx="378.0" cy="20.5" r="2.6" class="pace-dot"></circle><circle cx="406.0" cy="43.9" r="2.6" class="pace-dot"></circle><circle cx="434.0" cy="31.3" r="2.6" class="pace-dot"></circle><circle cx="462.0" cy="22.8" r="2.6" class="pace-dot"></circle><circle cx="490.0" cy="33.2" r="2.6" class="pace-dot"></circle><circle cx="518.0" cy="37.9" r="2.6" class="pace-dot"></circle><circle cx="546.0" cy="30.7" r="2.6" class="pace-dot"></circle><circle cx="574.0" cy="30.6" r="2.6" class="pace-dot"></circle><circle cx="602.0" cy="54.0" r="2.6" class="pace-dot"></circle><circle cx="630.0" cy="40.7" r="2.6" class="pace-dot"></circle><text x="622.0" y="32.7" class="pace-label" text-anchor="end">13:07/mi</text></svg>
+    </div>
+  </div>
+  <div class="chart-caption">Bars: weekly mileage · Line: weekly average pace (higher = faster)</div>
+</section>
+
+<section>
+  <h2>Most Recent Session</h2>
+  
+        <div class="run-summary">
+          <div class="name">Richmond - Intervals 5x800m</div>
+          <div class="meta">August 25, 2026</div>
+        </div>
+        <div class="ladder"><div class="seg seg-neutral" style="--w:17.168665308297026%" title="Lap 1: Warmup"></div><div class="seg seg-active" style="--w:6.822655166942983%" title="Lap 2: Active"></div><div class="seg seg-recovery" style="--w:5.870041298409239%" title="Lap 3: Recovery"></div><div class="seg seg-active" style="--w:6.575622183871335%" title="Lap 4: Active"></div><div class="seg seg-recovery" style="--w:6.011882616725221%" title="Lap 5: Recovery"></div><div class="seg seg-active" style="--w:6.757507925170045%" title="Lap 6: Active"></div><div class="seg seg-recovery" style="--w:7.165827096310533%" title="Lap 7: Recovery"></div><div class="seg seg-active" style="--w:7.501678332433835%" title="Lap 8: Active"></div><div class="seg seg-recovery" style="--w:7.6780677803819755%" title="Lap 9: Recovery"></div><div class="seg seg-active" style="--w:6.939024167756111%" title="Lap 10: Active"></div><div class="seg seg-neutral" style="--w:20.85850254642347%" title="Lap 11: Cooldown"></div><div class="seg seg-neutral" style="--w:1.5%" title="Lap 12: Cooldown"></div></div>
+        <div class="run-summary" style="margin-top:-4px;margin-bottom:10px;">
+          <div class="meta">5.50 mi · 1:12:10 ·
+          avg 13:07/mi · 151 bpm</div>
+        </div>
+        <div class="lap-row"><div class="lap-n">1</div><div class="lap-tag tag-warmup">Warmup</div><div class="lap-dist">1.00 mi</div><div class="lap-pace">12:23/mi</div><div class="lap-hr">146 bpm</div></div><div class="lap-row"><div class="lap-n">2</div><div class="lap-tag tag-active">Active</div><div class="lap-dist">0.50 mi</div><div class="lap-pace">9:54/mi</div><div class="lap-hr">167 bpm</div></div><div class="lap-row"><div class="lap-n">3</div><div class="lap-tag tag-recovery">Recovery</div><div class="lap-dist">0.25 mi</div><div class="lap-pace">17:03/mi</div><div class="lap-hr">147 bpm</div></div><div class="lap-row"><div class="lap-n">4</div><div class="lap-tag tag-active">Active</div><div class="lap-dist">0.50 mi</div><div class="lap-pace">9:33/mi</div><div class="lap-hr">167 bpm</div></div><div class="lap-row"><div class="lap-n">5</div><div class="lap-tag tag-recovery">Recovery</div><div class="lap-dist">0.25 mi</div><div class="lap-pace">17:27/mi</div><div class="lap-hr">152 bpm</div></div><div class="lap-row"><div class="lap-n">6</div><div class="lap-tag tag-active">Active</div><div class="lap-dist">0.50 mi</div><div class="lap-pace">9:49/mi</div><div class="lap-hr">168 bpm</div></div><div class="lap-row"><div class="lap-n">7</div><div class="lap-tag tag-recovery">Recovery</div><div class="lap-dist">0.25 mi</div><div class="lap-pace">20:48/mi</div><div class="lap-hr">141 bpm</div></div><div class="lap-row"><div class="lap-n">8</div><div class="lap-tag tag-active">Active</div><div class="lap-dist">0.50 mi</div><div class="lap-pace">10:53/mi</div><div class="lap-hr">159 bpm</div></div><div class="lap-row"><div class="lap-n">9</div><div class="lap-tag tag-recovery">Recovery</div><div class="lap-dist">0.25 mi</div><div class="lap-pace">22:18/mi</div><div class="lap-hr">133 bpm</div></div><div class="lap-row"><div class="lap-n">10</div><div class="lap-tag tag-active">Active</div><div class="lap-dist">0.50 mi</div><div class="lap-pace">10:04/mi</div><div class="lap-hr">158 bpm</div></div><div class="lap-row"><div class="lap-n">11</div><div class="lap-tag tag-cooldown">Cooldown</div><div class="lap-dist">1.00 mi</div><div class="lap-pace">15:03/mi</div><div class="lap-hr">145 bpm</div></div><div class="lap-row"><div class="lap-n">12</div><div class="lap-tag tag-cooldown">Cooldown</div><div class="lap-dist">0.02 mi</div><div class="lap-pace">24:23/mi</div><div class="lap-hr">153 bpm</div></div>
+        
+</section>
+
+<section>
+  <h2>Run Log · last 180 days (63 runs)</h2>
+  <div class="log-month">August 2026</div><div class="log-row"><div class="log-date">Aug 25</div><div class="log-name">Richmond - Intervals 5x800m</div><div class="log-stats"><span class="log-stat"><b>5.50</b> mi</span><span class="log-stat"><b>13:07</b>/mi</span><span class="log-stat"><b>151</b> bpm</span><span class="log-stat"><b>79</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 22</div><div class="log-name">Bellevue - Run</div><div class="log-stats"><span class="log-stat"><b>7.18</b> mi</span><span class="log-stat"><b>13:51</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>604</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 18</div><div class="log-name">Richmond - Tempo 1050</div><div class="log-stats"><span class="log-stat"><b>1.20</b> mi</span><span class="log-stat"><b>13:30</b>/mi</span><span class="log-stat"><b>144</b> bpm</span><span class="log-stat"><b>33</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 15</div><div class="log-name">New York Running</div><div class="log-stats"><span class="log-stat"><b>7.01</b> mi</span><span class="log-stat"><b>12:44</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>279</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 12</div><div class="log-name">Richmond - Tempo 1050</div><div class="log-stats"><span class="log-stat"><b>4.00</b> mi</span><span class="log-stat"><b>12:31</b>/mi</span><span class="log-stat"><b>161</b> bpm</span><span class="log-stat"><b>154</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 10</div><div class="log-name">Richmond - Wk1 Speed</div><div class="log-stats"><span class="log-stat"><b>3.31</b> mi</span><span class="log-stat"><b>12:26</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>125</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 8</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>6.81</b> mi</span><span class="log-stat"><b>12:52</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>210</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 6</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.26</b> mi</span><span class="log-stat"><b>12:25</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>125</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 4</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.76</b> mi</span><span class="log-stat"><b>12:29</b>/mi</span><span class="log-stat"><b>160</b> bpm</span><span class="log-stat"><b>75</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 3</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.28</b> mi</span><span class="log-stat"><b>12:21</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 1</div><div class="log-name">Oakland - Run</div><div class="log-stats"><span class="log-stat"><b>6.21</b> mi</span><span class="log-stat"><b>14:05</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>125</b> ft</span></span></div><div class="log-month">July 2026</div><div class="log-row"><div class="log-date">Jul 30</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.28</b> mi</span><span class="log-stat"><b>12:08</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>115</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 28</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.28</b> mi</span><span class="log-stat"><b>12:16</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 27</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.27</b> mi</span><span class="log-stat"><b>12:13</b>/mi</span><span class="log-stat"><b>161</b> bpm</span><span class="log-stat"><b>59</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 25</div><div class="log-name">San Leandro - Run</div><div class="log-stats"><span class="log-stat"><b>6.18</b> mi</span><span class="log-stat"><b>13:08</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>79</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 23</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.28</b> mi</span><span class="log-stat"><b>12:20</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>52</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 22</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.26</b> mi</span><span class="log-stat"><b>12:29</b>/mi</span><span class="log-stat"><b>155</b> bpm</span><span class="log-stat"><b>52</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 21</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.91</b> mi</span><span class="log-stat"><b>12:33</b>/mi</span><span class="log-stat"><b>157</b> bpm</span><span class="log-stat"><b>69</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 19</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>5.24</b> mi</span><span class="log-stat"><b>12:15</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>138</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 17</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.25</b> mi</span><span class="log-stat"><b>12:16</b>/mi</span><span class="log-stat"><b>170</b> bpm</span><span class="log-stat"><b>121</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 15</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.27</b> mi</span><span class="log-stat"><b>12:15</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>66</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 14</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.32</b> mi</span><span class="log-stat"><b>11:57</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>62</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 12</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>4.26</b> mi</span><span class="log-stat"><b>12:18</b>/mi</span><span class="log-stat"><b>166</b> bpm</span><span class="log-stat"><b>89</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 10</div><div class="log-name">Richmond - Benchmark Run</div><div class="log-stats"><span class="log-stat"><b>2.15</b> mi</span><span class="log-stat"><b>12:57</b>/mi</span><span class="log-stat"><b>148</b> bpm</span><span class="log-stat"><b>92</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 8</div><div class="log-name">Richmond Strides 4x40s</div><div class="log-stats"><span class="log-stat"><b>0.55</b> mi</span><span class="log-stat"><b>15:11</b>/mi</span><span class="log-stat"><b>146</b> bpm</span><span class="log-stat"><b>13</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 8</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.01</b> mi</span><span class="log-stat"><b>12:26</b>/mi</span><span class="log-stat"><b>162</b> bpm</span><span class="log-stat"><b>157</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 4</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.51</b> mi</span><span class="log-stat"><b>13:24</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>95</b> ft</span></span></div><div class="log-month">June 2026</div><div class="log-row"><div class="log-date">Jun 30</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.21</b> mi</span><span class="log-stat"><b>13:07</b>/mi</span><span class="log-stat"><b>141</b> bpm</span><span class="log-stat"><b>82</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 28</div><div class="log-name">Alameda Running</div><div class="log-stats"><span class="log-stat"><b>5.04</b> mi</span><span class="log-stat"><b>12:06</b>/mi</span><span class="log-stat"><b>167</b> bpm</span><span class="log-stat"><b>59</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 23</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.01</b> mi</span><span class="log-stat"><b>12:03</b>/mi</span><span class="log-stat"><b>166</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 13</div><div class="log-name">Medford Running</div><div class="log-stats"><span class="log-stat"><b>3.04</b> mi</span><span class="log-stat"><b>11:56</b>/mi</span><span class="log-stat"><b>161</b> bpm</span><span class="log-stat"><b>141</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 9</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.53</b> mi</span><span class="log-stat"><b>11:32</b>/mi</span><span class="log-stat"><b>164</b> bpm</span><span class="log-stat"><b>39</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 7</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>4.05</b> mi</span><span class="log-stat"><b>12:19</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 5</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.59</b> mi</span><span class="log-stat"><b>12:50</b>/mi</span><span class="log-stat"><b>168</b> bpm</span><span class="log-stat"><b>59</b> ft</span></span></div><div class="log-month">May 2026</div><div class="log-row"><div class="log-date">May 24</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.01</b> mi</span><span class="log-stat"><b>11:34</b>/mi</span><span class="log-stat"><b>162</b> bpm</span><span class="log-stat"><b>102</b> ft</span></span></div><div class="log-row"><div class="log-date">May 21</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.02</b> mi</span><span class="log-stat"><b>11:25</b>/mi</span><span class="log-stat"><b>156</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">May 19</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.51</b> mi</span><span class="log-stat"><b>12:20</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">May 13</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.54</b> mi</span><span class="log-stat"><b>12:52</b>/mi</span><span class="log-stat"><b>152</b> bpm</span><span class="log-stat"><b>39</b> ft</span></span></div><div class="log-row"><div class="log-date">May 11</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.51</b> mi</span><span class="log-stat"><b>12:15</b>/mi</span><span class="log-stat"><b>154</b> bpm</span><span class="log-stat"><b>39</b> ft</span></span></div><div class="log-row"><div class="log-date">May 9</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.52</b> mi</span><span class="log-stat"><b>12:19</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>39</b> ft</span></span></div><div class="log-row"><div class="log-date">May 7</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.01</b> mi</span><span class="log-stat"><b>11:35</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>56</b> ft</span></span></div><div class="log-row"><div class="log-date">May 5</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.67</b> mi</span><span class="log-stat"><b>12:29</b>/mi</span><span class="log-stat"><b>157</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">May 2</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.26</b> mi</span><span class="log-stat"><b>12:22</b>/mi</span><span class="log-stat"><b>154</b> bpm</span><span class="log-stat"><b>75</b> ft</span></span></div><div class="log-month">April 2026</div><div class="log-row"><div class="log-date">Apr 30</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.07</b> mi</span><span class="log-stat"><b>12:08</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>26</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 28</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.51</b> mi</span><span class="log-stat"><b>12:14</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 26</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.05</b> mi</span><span class="log-stat"><b>12:30</b>/mi</span><span class="log-stat"><b>157</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 25</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>1.53</b> mi</span><span class="log-stat"><b>11:25</b>/mi</span><span class="log-stat"><b>155</b> bpm</span><span class="log-stat"><b>13</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 22</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.15</b> mi</span><span class="log-stat"><b>11:45</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>30</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 19</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.01</b> mi</span><span class="log-stat"><b>12:06</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 16</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.01</b> mi</span><span class="log-stat"><b>11:55</b>/mi</span><span class="log-stat"><b>161</b> bpm</span><span class="log-stat"><b>26</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 14</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.53</b> mi</span><span class="log-stat"><b>11:59</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 12</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.78</b> mi</span><span class="log-stat"><b>12:01</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>62</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 9</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>1.52</b> mi</span><span class="log-stat"><b>11:43</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>23</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 6</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.45</b> mi</span><span class="log-stat"><b>12:35</b>/mi</span><span class="log-stat"><b>152</b> bpm</span><span class="log-stat"><b>30</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 5</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>1.57</b> mi</span><span class="log-stat"><b>11:29</b>/mi</span><span class="log-stat"><b>160</b> bpm</span><span class="log-stat"><b>23</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 1</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.59</b> mi</span><span class="log-stat"><b>13:30</b>/mi</span><span class="log-stat"><b>149</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-month">March 2026</div><div class="log-row"><div class="log-date">Mar 30</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.07</b> mi</span><span class="log-stat"><b>12:20</b>/mi</span><span class="log-stat"><b>164</b> bpm</span><span class="log-stat"><b>7</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 25</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.16</b> mi</span><span class="log-stat"><b>12:03</b>/mi</span><span class="log-stat"><b>170</b> bpm</span><span class="log-stat"><b>30</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 23</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.18</b> mi</span><span class="log-stat"><b>11:44</b>/mi</span><span class="log-stat"><b>173</b> bpm</span><span class="log-stat"><b>30</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 15</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.00</b> mi</span><span class="log-stat"><b>13:19</b>/mi</span><span class="log-stat"><b>152</b> bpm</span><span class="log-stat"><b>23</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 9</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.78</b> mi</span><span class="log-stat"><b>13:30</b>/mi</span><span class="log-stat"><b>154</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 6</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.05</b> mi</span><span class="log-stat"><b>13:03</b>/mi</span><span class="log-stat"><b>165</b> bpm</span><span class="log-stat"><b>49</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 2</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.09</b> mi</span><span class="log-stat"><b>12:42</b>/mi</span><span class="log-stat"><b>155</b> bpm</span><span class="log-stat"><b>30</b> ft</span></span></div>
+</section>
+
+<footer>Garmin Connect → GitHub Actions → GitHub Pages · runs daily</footer>
 </div>
-
-<h2>Most Recent Run — Splits</h2>
-<table><tr><th>Lap</th><th>Pace</th><th>Avg HR</th></tr><tr><td>1</td><td>7.7 min/km</td><td>146.0</td></tr>
-<tr><td>2</td><td>6.15 min/km</td><td>167.0</td></tr>
-<tr><td>3</td><td>10.59 min/km</td><td>147.0</td></tr>
-<tr><td>4</td><td>5.93 min/km</td><td>167.0</td></tr>
-<tr><td>5</td><td>10.84 min/km</td><td>152.0</td></tr>
-<tr><td>6</td><td>6.1 min/km</td><td>168.0</td></tr>
-<tr><td>7</td><td>12.93 min/km</td><td>141.0</td></tr>
-<tr><td>8</td><td>6.77 min/km</td><td>159.0</td></tr>
-<tr><td>9</td><td>13.85 min/km</td><td>133.0</td></tr>
-<tr><td>10</td><td>6.26 min/km</td><td>158.0</td></tr>
-<tr><td>11</td><td>9.35 min/km</td><td>145.0</td></tr>
-<tr><td>12</td><td>15.15 min/km</td><td>153.0</td></tr>
-</table>
-
-<h2>Weekly Volume (last ~13 weeks)</h2>
-<table><tr><th>Week</th><th>Distance</th></tr><tr><td>Week 1</td><td>6.5 km</td></tr>
-<tr><td>Week 2</td><td>4.4 km</td></tr>
-<tr><td>Week 3</td><td>7.6 km</td></tr>
-<tr><td>Week 4</td><td>4.2 km</td></tr>
-<tr><td>Week 5</td><td>5.5 km</td></tr>
-<tr><td>Week 6</td><td>2.4 km</td></tr>
-<tr><td>Week 9</td><td>6.7 km</td></tr>
-<tr><td>Week 10</td><td>6.7 km</td></tr>
-<tr><td>Week 11</td><td>7.7 km</td></tr>
-<tr><td>Week 13</td><td>7.0 km</td></tr>
-<tr><td>Week 14</td><td>10.0 km</td></tr>
-<tr><td>Week 15</td><td>10.9 km</td></tr>
-<tr><td>Week 16</td><td>12.1 km</td></tr>
-<tr><td>Week 17</td><td>9.2 km</td></tr>
-<tr><td>Week 18</td><td>12.6 km</td></tr>
-<tr><td>Week 19</td><td>13.2 km</td></tr>
-<tr><td>Week 20</td><td>9.7 km</td></tr>
-<tr><td>Week 21</td><td>12.1 km</td></tr>
-<tr><td>Week 23</td><td>10.7 km</td></tr>
-<tr><td>Week 24</td><td>9.0 km</td></tr>
-<tr><td>Week 26</td><td>11.3 km</td></tr>
-<tr><td>Week 27</td><td>9.2 km</td></tr>
-<tr><td>Week 28</td><td>16.1 km</td></tr>
-<tr><td>Week 29</td><td>21.1 km</td></tr>
-<tr><td>Week 30</td><td>23.6 km</td></tr>
-<tr><td>Week 31</td><td>24.2 km</td></tr>
-<tr><td>Week 32</td><td>25.9 km</td></tr>
-<tr><td>Week 33</td><td>23.1 km</td></tr>
-<tr><td>Week 34</td><td>13.5 km</td></tr>
-<tr><td>Week 35</td><td>8.8 km</td></tr>
-<tr><td>Week 37</td><td>3.9 km</td></tr>
-<tr><td>Week 38</td><td>5.1 km</td></tr>
-<tr><td>Week 40</td><td>4.3 km</td></tr>
-<tr><td>Week 41</td><td>6.4 km</td></tr>
-<tr><td>Week 42</td><td>7.1 km</td></tr>
-<tr><td>Week 43</td><td>10.2 km</td></tr>
-<tr><td>Week 44</td><td>6.6 km</td></tr>
-<tr><td>Week 45</td><td>6.6 km</td></tr>
-<tr><td>Week 48</td><td>3.2 km</td></tr>
-<tr><td>Week 49</td><td>7.6 km</td></tr>
-<tr><td>Week 50</td><td>11.9 km</td></tr>
-<tr><td>Week 51</td><td>6.7 km</td></tr>
-<tr><td>Week 52</td><td>2.2 km</td></tr>
-</table>
-
-<h2>Run Log (last 90 days)</h2>
-<table>
-<tr><th>Date</th><th>Name</th><th>Distance</th><th>Duration</th><th>Avg HR</th><th>Elev Gain</th></tr>
-<tr><td>2026-08-25</td><td>Richmond - Intervals 5x800m</td><td>8.85 km</td><td>72.2 min</td><td>151.0</td><td>24.0</td></tr>
-<tr><td>2026-08-22</td><td>Bellevue - Run</td><td>11.55 km</td><td>99.5 min</td><td>158.0</td><td>184.0</td></tr>
-<tr><td>2026-08-18</td><td>Richmond - Tempo 1050</td><td>1.92 km</td><td>16.1 min</td><td>144.0</td><td>10.0</td></tr>
-<tr><td>2026-08-15</td><td>New York Running</td><td>11.28 km</td><td>89.2 min</td><td>158.0</td><td>85.0</td></tr>
-<tr><td>2026-08-12</td><td>Richmond - Tempo 1050</td><td>6.45 km</td><td>50.2 min</td><td>161.0</td><td>47.0</td></tr>
-<tr><td>2026-08-10</td><td>Richmond - Wk1 Speed</td><td>5.32 km</td><td>41.1 min</td><td>158.0</td><td>38.0</td></tr>
-<tr><td>2026-08-08</td><td>Richmond - Run</td><td>10.96 km</td><td>87.7 min</td><td>158.0</td><td>64.0</td></tr>
-<tr><td>2026-08-06</td><td>Richmond - Run</td><td>5.24 km</td><td>40.5 min</td><td>163.0</td><td>38.0</td></tr>
-<tr><td>2026-08-04</td><td>Richmond - Run</td><td>4.44 km</td><td>34.4 min</td><td>160.0</td><td>23.0</td></tr>
-<tr><td>2026-08-03</td><td>Richmond - Run</td><td>5.27 km</td><td>40.4 min</td><td>159.0</td><td>14.0</td></tr>
-<tr><td>2026-08-01</td><td>Oakland - Run</td><td>10.0 km</td><td>87.6 min</td><td>158.0</td><td>38.0</td></tr>
-<tr><td>2026-07-30</td><td>Richmond - Run</td><td>5.28 km</td><td>39.8 min</td><td>163.0</td><td>35.0</td></tr>
-<tr><td>2026-07-28</td><td>Richmond - Run</td><td>3.66 km</td><td>27.9 min</td><td>158.0</td><td>11.0</td></tr>
-<tr><td>2026-07-27</td><td>Richmond - Run</td><td>5.26 km</td><td>39.9 min</td><td>161.0</td><td>18.0</td></tr>
-<tr><td>2026-07-25</td><td>San Leandro - Run</td><td>9.95 km</td><td>81.2 min</td><td>163.0</td><td>24.0</td></tr>
-<tr><td>2026-07-23</td><td>Richmond - Run</td><td>5.27 km</td><td>40.4 min</td><td>158.0</td><td>16.0</td></tr>
-<tr><td>2026-07-22</td><td>Richmond - Run</td><td>3.64 km</td><td>28.2 min</td><td>155.0</td><td>16.0</td></tr>
-<tr><td>2026-07-21</td><td>Richmond - Run</td><td>4.69 km</td><td>36.5 min</td><td>157.0</td><td>21.0</td></tr>
-<tr><td>2026-07-19</td><td>Richmond - Run</td><td>8.44 km</td><td>64.2 min</td><td>163.0</td><td>42.0</td></tr>
-<tr><td>2026-07-17</td><td>Richmond - Run</td><td>5.23 km</td><td>39.9 min</td><td>170.0</td><td>37.0</td></tr>
-<tr><td>2026-07-15</td><td>Richmond - Run</td><td>3.65 km</td><td>27.8 min</td><td>163.0</td><td>20.0</td></tr>
-<tr><td>2026-07-14</td><td>Richmond - Run</td><td>3.74 km</td><td>27.8 min</td><td>158.0</td><td>19.0</td></tr>
-<tr><td>2026-07-12</td><td>Richmond - Run</td><td>6.86 km</td><td>52.4 min</td><td>166.0</td><td>27.0</td></tr>
-<tr><td>2026-07-10</td><td>Richmond - Benchmark Run</td><td>3.47 km</td><td>27.9 min</td><td>148.0</td><td>28.0</td></tr>
-<tr><td>2026-07-08</td><td>Richmond Strides 4x40s</td><td>0.88 km</td><td>8.3 min</td><td>146.0</td><td>4.0</td></tr>
-<tr><td>2026-07-08</td><td>Richmond Running</td><td>4.84 km</td><td>37.4 min</td><td>162.0</td><td>48.0</td></tr>
-<tr><td>2026-07-04</td><td>Richmond Running</td><td>5.65 km</td><td>47.1 min</td><td>158.0</td><td>29.0</td></tr>
-<tr><td>2026-06-30</td><td>Richmond Running</td><td>3.55 km</td><td>28.9 min</td><td>141.0</td><td>25.0</td></tr>
-<tr><td>2026-06-28</td><td>Alameda Running</td><td>8.11 km</td><td>60.9 min</td><td>167.0</td><td>18.0</td></tr>
-<tr><td>2026-06-23</td><td>Richmond Running</td><td>3.24 km</td><td>24.2 min</td><td>166.0</td><td>11.0</td></tr>
-<tr><td>2026-06-13</td><td>Medford Running</td><td>4.89 km</td><td>36.3 min</td><td>161.0</td><td>43.0</td></tr>
-<tr><td>2026-06-09</td><td>Richmond Running</td><td>4.07 km</td><td>29.1 min</td><td>164.0</td><td>12.0</td></tr>
-<tr><td>2026-06-07</td><td>Richmond Running</td><td>6.52 km</td><td>49.9 min</td><td>163.0</td><td>14.0</td></tr>
-<tr><td>2026-06-05</td><td>Richmond Running</td><td>4.16 km</td><td>33.2 min</td><td>168.0</td><td>18.0</td></tr>
-<tr><td>2026-05-24</td><td>Richmond Running</td><td>4.85 km</td><td>34.8 min</td><td>162.0</td><td>31.0</td></tr>
-<tr><td>2026-05-21</td><td>Richmond Running</td><td>3.26 km</td><td>23.1 min</td><td>156.0</td><td>11.0</td></tr>
-<tr><td>2026-05-19</td><td>Richmond Running</td><td>4.04 km</td><td>30.9 min</td><td>159.0</td><td>11.0</td></tr>
-<tr><td>2026-05-13</td><td>Richmond Running</td><td>5.7 km</td><td>45.6 min</td><td>152.0</td><td>12.0</td></tr>
-<tr><td>2026-05-11</td><td>Richmond Running</td><td>4.04 km</td><td>30.8 min</td><td>154.0</td><td>12.0</td></tr>
-<tr><td>2026-05-09</td><td>Richmond Running</td><td>5.66 km</td><td>43.3 min</td><td>158.0</td><td>12.0</td></tr>
-<tr><td>2026-05-07</td><td>Richmond Running</td><td>3.24 km</td><td>23.3 min</td><td>159.0</td><td>17.0</td></tr>
-<tr><td>2026-05-05</td><td>Richmond Running</td><td>4.3 km</td><td>33.3 min</td><td>157.0</td><td>11.0</td></tr>
-<tr><td>2026-05-02</td><td>Richmond Running</td><td>5.25 km</td><td>40.3 min</td><td>154.0</td><td>23.0</td></tr>
-<tr><td>2026-04-30</td><td>Richmond Running</td><td>3.34 km</td><td>25.2 min</td><td>159.0</td><td>8.0</td></tr>
-<tr><td>2026-04-28</td><td>Richmond Running</td><td>4.04 km</td><td>30.7 min</td><td>159.0</td><td>11.0</td></tr>
-<tr><td>2026-04-26</td><td>Richmond Running</td><td>3.31 km</td><td>25.7 min</td><td>157.0</td><td>14.0</td></tr>
-<tr><td>2026-04-25</td><td>Richmond Running</td><td>2.45 km</td><td>17.4 min</td><td>155.0</td><td>4.0</td></tr>
-<tr><td>2026-04-22</td><td>Richmond Running</td><td>3.46 km</td><td>25.3 min</td><td>159.0</td><td>9.0</td></tr>
-<tr><td>2026-04-19</td><td>Richmond Running</td><td>4.84 km</td><td>36.4 min</td><td>163.0</td><td>14.0</td></tr>
-<tr><td>2026-04-16</td><td>Richmond Running</td><td>3.23 km</td><td>23.9 min</td><td>161.0</td><td>8.0</td></tr>
-<tr><td>2026-04-14</td><td>Richmond Running</td><td>4.07 km</td><td>30.3 min</td><td>163.0</td><td>14.0</td></tr>
-<tr><td>2026-04-12</td><td>Richmond Running</td><td>4.47 km</td><td>33.4 min</td><td>159.0</td><td>19.0</td></tr>
-<tr><td>2026-04-09</td><td>Richmond Running</td><td>2.45 km</td><td>17.8 min</td><td>159.0</td><td>7.0</td></tr>
-<tr><td>2026-04-06</td><td>Richmond Running</td><td>3.94 km</td><td>30.8 min</td><td>152.0</td><td>9.0</td></tr>
-<tr><td>2026-04-05</td><td>Richmond Running</td><td>2.53 km</td><td>18.0 min</td><td>160.0</td><td>7.0</td></tr>
-<tr><td>2026-04-01</td><td>Richmond Running</td><td>4.17 km</td><td>35.0 min</td><td>149.0</td><td>11.0</td></tr>
-<tr><td>2026-03-30</td><td>Richmond Running</td><td>3.33 km</td><td>25.6 min</td><td>164.0</td><td>2.0</td></tr>
-<tr><td>2026-03-25</td><td>Richmond Running</td><td>3.47 km</td><td>26.0 min</td><td>170.0</td><td>9.0</td></tr>
-<tr><td>2026-03-23</td><td>Richmond Running</td><td>3.51 km</td><td>25.6 min</td><td>173.0</td><td>9.0</td></tr>
-<tr><td>2026-03-15</td><td>Richmond Running</td><td>3.23 km</td><td>26.7 min</td><td>152.0</td><td>7.0</td></tr>
-<tr><td>2026-03-09</td><td>Richmond Running</td><td>4.48 km</td><td>37.6 min</td><td>154.0</td><td>14.0</td></tr>
-<tr><td>2026-03-06</td><td>Richmond Running</td><td>3.31 km</td><td>26.8 min</td><td>165.0</td><td>15.0</td></tr>
-<tr><td>2026-03-02</td><td>Richmond Running</td><td>3.36 km</td><td>26.5 min</td><td>155.0</td><td>9.0</td></tr>
-<tr><td>2026-02-25</td><td>Richmond Running</td><td>3.39 km</td><td>27.1 min</td><td>167.0</td><td>2.0</td></tr>
-<tr><td>2026-02-23</td><td>Richmond Running</td><td>3.28 km</td><td>28.0 min</td><td>155.0</td><td>5.0</td></tr>
-<tr><td>2026-02-04</td><td>Richmond Running</td><td>2.41 km</td><td>19.3 min</td><td>161.0</td><td>3.0</td></tr>
-<tr><td>2026-02-01</td><td>Richmond Running</td><td>2.29 km</td><td>18.7 min</td><td>155.0</td><td>3.0</td></tr>
-<tr><td>2026-01-28</td><td>Richmond Running</td><td>3.22 km</td><td>28.4 min</td><td>151.0</td><td>4.0</td></tr>
-<tr><td>2026-01-20</td><td>Richmond Running</td><td>4.17 km</td><td>32.5 min</td><td>158.0</td><td>6.0</td></tr>
-<tr><td>2026-01-16</td><td>Richmond Running</td><td>4.16 km</td><td>32.6 min</td><td>169.0</td><td>7.0</td></tr>
-<tr><td>2026-01-13</td><td>Richmond Running</td><td>3.44 km</td><td>26.4 min</td><td>160.0</td><td>3.0</td></tr>
-<tr><td>2026-01-06</td><td>Richmond Running</td><td>4.43 km</td><td>37.1 min</td><td>160.0</td><td>6.0</td></tr>
-<tr><td>2026-01-03</td><td>Richmond Running</td><td>1.62 km</td><td>14.4 min</td><td>149.0</td><td>1.0</td></tr>
-<tr><td>2025-12-29</td><td>Richmond Running</td><td>4.84 km</td><td>36.9 min</td><td>161.0</td><td>3.0</td></tr>
-<tr><td>2025-12-24</td><td>Richmond Running</td><td>2.23 km</td><td>15.7 min</td><td>137.0</td><td>3.0</td></tr>
-<tr><td>2025-12-20</td><td>Richmond Running</td><td>3.43 km</td><td>27.7 min</td><td>156.0</td><td>3.0</td></tr>
-<tr><td>2025-12-17</td><td>Richmond Running</td><td>3.22 km</td><td>28.2 min</td><td>150.0</td><td>4.0</td></tr>
-<tr><td>2025-12-14</td><td>Richmond Running</td><td>4.3 km</td><td>32.7 min</td><td>163.0</td><td>13.0</td></tr>
-<tr><td>2025-12-11</td><td>Richmond Running</td><td>4.33 km</td><td>34.7 min</td><td>164.0</td><td>9.0</td></tr>
-<tr><td>2025-12-08</td><td>Richmond Running</td><td>3.23 km</td><td>26.6 min</td><td>153.0</td><td>7.0</td></tr>
-<tr><td>2025-12-04</td><td>Richmond Running</td><td>4.35 km</td><td>38.6 min</td><td>159.0</td><td>8.0</td></tr>
-<tr><td>2025-12-01</td><td>Richmond Running</td><td>3.23 km</td><td>25.9 min</td><td>143.0</td><td>3.0</td></tr>
-<tr><td>2025-11-24</td><td>Richmond Running</td><td>3.23 km</td><td>28.1 min</td><td>154.0</td><td>2.0</td></tr>
-<tr><td>2025-11-08</td><td>Running</td><td>3.27 km</td><td>25.0 min</td><td>166.0</td><td>6.0</td></tr>
-<tr><td>2025-11-04</td><td>Richmond Running</td><td>3.36 km</td><td>28.3 min</td><td>159.0</td><td>21.0</td></tr>
-<tr><td>2025-11-02</td><td>Richmond Running</td><td>3.35 km</td><td>26.3 min</td><td>167.0</td><td>2.0</td></tr>
-<tr><td>2025-10-29</td><td>Richmond Running</td><td>3.22 km</td><td>27.0 min</td><td>162.0</td><td>5.0</td></tr>
-<tr><td>2025-10-26</td><td>Richmond Running</td><td>2.35 km</td><td>18.0 min</td><td>165.0</td><td>11.0</td></tr>
-<tr><td>2025-10-23</td><td>Richmond Running</td><td>3.82 km</td><td>33.3 min</td><td>143.0</td><td>8.0</td></tr>
-<tr><td>2025-10-20</td><td>Richmond Running</td><td>4.04 km</td><td>34.2 min</td><td>165.0</td><td>3.0</td></tr>
-<tr><td>2025-10-17</td><td>Richmond Running</td><td>3.9 km</td><td>33.1 min</td><td>164.0</td><td>4.0</td></tr>
-<tr><td>2025-10-14</td><td>Richmond Running</td><td>3.17 km</td><td>25.6 min</td><td>150.0</td><td>1.0</td></tr>
-<tr><td>2025-10-11</td><td>Richmond Running</td><td>3.23 km</td><td>27.3 min</td><td>156.0</td><td>3.0</td></tr>
-<tr><td>2025-10-06</td><td>Richmond Running</td><td>3.16 km</td><td>25.3 min</td><td>171.0</td><td>2.0</td></tr>
-<tr><td>2025-10-01</td><td>Richmond Running</td><td>1.62 km</td><td>11.0 min</td><td>170.0</td><td>1.0</td></tr>
-<tr><td>2025-09-29</td><td>Richmond Running</td><td>2.68 km</td><td>25.2 min</td><td>145.0</td><td>2.0</td></tr>
-<tr><td>2025-09-19</td><td>Richmond Running</td><td>2.74 km</td><td>23.2 min</td><td>157.0</td><td>3.0</td></tr>
-<tr><td>2025-09-17</td><td>Richmond Running</td><td>2.35 km</td><td>19.2 min</td><td>158.0</td><td>2.0</td></tr>
-<tr><td>2025-09-14</td><td>Richmond Running</td><td>2.07 km</td><td>17.4 min</td><td>153.0</td><td>4.0</td></tr>
-<tr><td>2025-09-09</td><td>Richmond Running</td><td>1.82 km</td><td>15.0 min</td><td>154.0</td><td>1.0</td></tr>
-
-</table>
-
 </body>
 </html>

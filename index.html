@@ -1,252 +1,624 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Training Dashboard</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Training Console — Half Marathon</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
-:root {
-  --paper: #EFF1EC; --paper-raised: #FBFCFA; --ink: #1B2420; --ink-muted: #5B655F;
-  --line: rgba(27,36,32,0.12); --accent: #B0501F;
-  --good: #15876F; --warning: #B8862A; --critical: #B23B33;
-  --seq-0: #DCEAE1; --seq-1: #B8D8C6; --seq-2: #8CC0A6; --seq-3: #54A17E; --seq-4: #1F8955;
-  --font-display: 'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif;
-  --font-body: 'IBM Plex Sans', -apple-system, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+:root{
+  --bg: #12151a; --bg-panel: #1a1e24; --bg-raised: #20252c; --bg-inset: #0d1013;
+  --border: #2a3038; --border-soft: #22262d;
+  --text: #e7e9ec; --text-muted: #8b95a1; --text-dim: #5c6570;
+  --amber: #e3a857; --amber-dim: #4a3d28;
+  --teal: #5fa8a0; --teal-dim: #24393a;
+  --clay: #c1614a; --clay-dim: #3c2620;
+  --blue: #6690c4; --blue-dim: #232f42;
+  --font-display: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #141B18; --paper-raised: #1C2420; --ink: #E7ECE7; --ink-muted: #93A199;
-    --line: rgba(231,236,231,0.14); --accent: #D9814F;
-    --good: #29A37A; --warning: #C99A2C; --critical: #D3554C;
-    --seq-0: #1E2B25; --seq-1: #2A4536; --seq-2: #3B6B4F; --seq-3: #4F9670; --seq-4: #6FC79B;
-  }
-}
-* { box-sizing: border-box; }
-body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--font-body); padding:0 0 48px; -webkit-font-smoothing:antialiased; }
-.wrap { max-width:680px; margin:0 auto; padding:20px 16px 0; }
-header.top { display:flex; justify-content:space-between; align-items:baseline; padding:4px 2px 18px; border-bottom:1px solid var(--line); margin-bottom:22px; }
-h1 { font-family:var(--font-display); font-weight:700; font-size:1.5rem; margin:0; text-wrap:balance; }
-.updated { font-family:var(--font-mono); font-size:0.7rem; color:var(--ink-muted); text-align:right; }
-h2 { font-family:var(--font-display); font-weight:600; font-size:0.78rem; text-transform:uppercase; letter-spacing:0.09em; color:var(--ink-muted); margin:0 0 12px; }
-section { margin-bottom:34px; }
-.empty { color:var(--ink-muted); font-size:0.85rem; }
-
-.race-card { background:var(--paper-raised); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:10px; padding:16px 16px 14px; }
-.race-card.tone-good { border-left-color:var(--good); }
-.race-card.tone-caution { border-left-color:var(--warning); }
-.race-card.tone-neutral { border-left-color:var(--accent); }
-.race-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; flex-wrap:wrap; gap:6px; }
-.race-title { font-family:var(--font-display); font-weight:600; font-size:0.95rem; }
-.race-phase { display:inline-block; font-size:0.62rem; text-transform:uppercase; letter-spacing:0.05em; padding:2px 7px; border-radius:10px; background:var(--line); color:var(--ink-muted); margin-left:8px; }
-.race-days { font-family:var(--font-mono); font-size:0.8rem; color:var(--ink-muted); }
-.rec-headline { font-size:1rem; font-weight:600; margin-bottom:8px; }
-.tone-good .rec-headline { color:var(--good); }
-.tone-caution .rec-headline { color:var(--warning); }
-.tone-neutral .rec-headline { color:var(--ink); }
-.rec-notes { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
-.rec-notes li { font-size:0.85rem; color:var(--ink-muted); line-height:1.4; padding-left:14px; position:relative; }
-.rec-notes li::before { content:""; position:absolute; left:0; top:0.5em; width:5px; height:5px; border-radius:50%; background:var(--accent); }
-.tone-good .rec-notes li::before { background:var(--good); }
-.tone-caution .rec-notes li::before { background:var(--warning); }
-.rec-disclaimer { font-size:0.68rem; color:var(--ink-muted); margin-top:10px; font-style:italic; }
-
-.stat-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
-.stat-tile { background:var(--paper-raised); border:1px solid var(--line); border-radius:10px; padding:14px 14px 12px; }
-.stat-value { font-family:var(--font-mono); font-size:1.7rem; font-weight:500; font-variant-numeric:tabular-nums; line-height:1.1; }
-.stat-label { font-size:0.72rem; color:var(--ink-muted); margin-top:4px; text-transform:uppercase; letter-spacing:0.06em; }
-.stat-sub { font-size:0.72rem; color:var(--ink-muted); margin-top:2px; }
-.stat-tile.rhr-tile { display:flex; flex-direction:column; }
-.stat-tile.rhr-tile .rhr-row { display:flex; align-items:flex-end; justify-content:space-between; gap:8px; }
-.rhr-line { fill:none; stroke:var(--good); stroke-width:1.6; }
-.rhr-dot { fill:var(--good); }
-.vo2-line { fill:none; stroke:var(--accent); stroke-width:1.6; }
-.vo2-dot { fill:var(--accent); }
-
-.pill { display:inline-flex; align-items:center; gap:5px; font-size:0.68rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; padding:3px 8px; border-radius:20px; margin-top:6px; color:var(--good); background:color-mix(in srgb, var(--good) 14%, transparent); }
-.pill::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
-
-.insights { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:9px; }
-.insights li { position:relative; padding-left:16px; font-size:0.88rem; line-height:1.45; }
-.insights li::before { content:""; position:absolute; left:0; top:0.55em; width:6px; height:6px; border-radius:50%; background:var(--accent); }
-
-.vol-scroll { overflow-x:auto; padding-bottom:6px; }
-.chart-stack { display:flex; flex-direction:column; gap:2px; width:max-content; }
-.vol-chart { display:flex; align-items:flex-end; gap:6px; height:110px; padding:0 2px; }
-.vol-bar { width:22px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; flex-shrink:0; }
-.vol-bar-fill { width:100%; height:var(--h); border-radius:3px 3px 1px 1px; }
-.vol-step-0 { background:var(--seq-0); }
-.vol-step-1 { background:var(--seq-1); }
-.vol-step-2 { background:var(--seq-2); }
-.vol-step-3 { background:var(--seq-3); }
-.vol-step-4 { background:var(--seq-4); }
-.vol-bar-label { font-family:var(--font-mono); font-size:0.56rem; color:var(--ink-muted); margin-top:5px; }
-.pace-svg { display:block; }
-.pace-line { fill:none; stroke:var(--accent); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
-.pace-area { fill:color-mix(in srgb, var(--accent) 10%, transparent); stroke:none; }
-.pace-dot { fill:var(--paper-raised); stroke:var(--accent); stroke-width:1.6; }
-.pace-label { font-family:var(--font-mono); font-size:9px; fill:var(--ink-muted); }
-.chart-caption { font-family:var(--font-mono); font-size:0.64rem; color:var(--ink-muted); margin-top:6px; }
-
-.predict-list { display:flex; flex-direction:column; gap:2px; margin-bottom:16px; }
-.predict-row { display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-bottom:1px solid var(--line); font-family:var(--font-mono); font-size:0.85rem; }
-.predict-row.highlight { background:color-mix(in srgb, var(--accent) 8%, transparent); border-radius:6px; font-weight:600; border-bottom-color:transparent; }
-.predict-label { color:var(--ink-muted); font-family:var(--font-body); text-transform:uppercase; font-size:0.7rem; letter-spacing:0.05em; }
-.predict-row.highlight .predict-label { color:var(--accent); }
-.predict-time { font-variant-numeric:tabular-nums; }
-.score-row { display:flex; gap:22px; }
-.score-item b { font-family:var(--font-mono); font-size:1.2rem; font-variant-numeric:tabular-nums; }
-.score-item span { display:block; font-family:var(--font-body); font-size:0.65rem; color:var(--ink-muted); text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }
-
-.ladder { display:flex; height:30px; border-radius:6px; overflow:hidden; gap:2px; margin-bottom:14px; }
-.seg { flex:0 0 var(--w); }
-.seg-active { background:var(--accent); }
-.seg-recovery { background:var(--ink-muted); opacity:0.35; }
-.seg-neutral { background:var(--ink-muted); opacity:0.18; }
-
-.lap-row { display:grid; grid-template-columns:20px 76px 1fr 1fr 1fr; align-items:center; gap:8px; padding:7px 2px; border-bottom:1px solid var(--line); font-family:var(--font-mono); font-size:0.8rem; }
-.lap-n { color:var(--ink-muted); }
-.lap-tag { font-family:var(--font-body); font-size:0.62rem; text-transform:uppercase; letter-spacing:0.04em; padding:2px 6px; border-radius:4px; text-align:center; background:var(--line); color:var(--ink-muted); }
-.tag-active { background:color-mix(in srgb, var(--accent) 18%, transparent); color:var(--accent); }
-.lap-dist, .lap-pace, .lap-hr { text-align:right; font-variant-numeric:tabular-nums; }
-
-.run-summary { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
-.run-summary .name { font-family:var(--font-display); font-weight:600; font-size:1rem; }
-.run-summary .meta { font-family:var(--font-mono); font-size:0.78rem; color:var(--ink-muted); }
-
-.log-month { font-family:var(--font-display); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--ink-muted); margin:18px 0 6px; padding-top:4px; }
-.log-month:first-child { margin-top:0; }
-.log-row { padding:9px 0; border-bottom:1px solid var(--line); }
-.log-date { font-family:var(--font-mono); font-size:0.68rem; color:var(--ink-muted); text-transform:uppercase; }
-.log-name { font-size:0.92rem; margin:2px 0 5px; }
-.log-stats { display:flex; gap:14px; font-family:var(--font-mono); font-size:0.76rem; color:var(--ink-muted); flex-wrap:wrap; }
-.log-stats b { color:var(--ink); font-weight:500; }
-
-footer { text-align:center; font-size:0.68rem; color:var(--ink-muted); margin-top:30px; font-family:var(--font-mono); }
+*{ box-sizing:border-box; margin:0; padding:0; }
+body{ background:var(--bg); color:var(--text); font-family:var(--font-body); line-height:1.5; -webkit-font-smoothing:antialiased; padding:0 0 64px; }
+::selection{ background:var(--amber); color:#12151a; }
+.wrap{ max-width:1180px; margin:0 auto; padding:0 24px; }
+.console-header{ border-bottom:1px solid var(--border); background: radial-gradient(ellipse 900px 300px at 15% -20%, rgba(227,168,87,0.10), transparent), var(--bg); padding:28px 0 22px; }
+.header-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:24px; flex-wrap:wrap; }
+.brand-eyebrow{ font-family:var(--font-mono); font-size:11px; letter-spacing:0.14em; color:var(--amber); text-transform:uppercase; display:block; margin-bottom:6px; }
+h1{ font-family:var(--font-display); font-weight:700; font-size:30px; letter-spacing:-0.01em; text-wrap:balance; }
+.sync-badge{ font-family:var(--font-mono); font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); white-space:nowrap; }
+.sync-dot{ width:7px; height:7px; border-radius:50%; background:var(--teal); box-shadow:0 0 8px var(--teal); flex-shrink:0; }
+.countdown-strip{ margin-top:22px; display:flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:var(--bg-panel); flex-wrap:wrap; }
+.countdown-cell{ flex:1; padding:16px 20px; border-right:1px solid var(--border-soft); display:flex; flex-direction:column; gap:4px; min-width:130px; }
+.countdown-cell:last-child{ border-right:none; }
+.cc-label{ font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); font-family:var(--font-mono); }
+.cc-value{ font-family:var(--font-mono); font-size:24px; font-weight:600; color:var(--text); }
+.cc-value.accent{ color:var(--amber); }
+.cc-sub{ font-size:12px; color:var(--text-muted); }
+.boot-errors{ margin-top:16px; padding:12px 16px; border:1px solid var(--clay); background:var(--clay-dim); border-radius:8px; font-family:var(--font-mono); font-size:12px; color:var(--clay); }
+.stat-strip{ display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-top:28px; }
+.stat-cell{ background:var(--bg-panel); padding:18px 18px 16px; }
+.stat-label{ font-size:11px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-dim); font-family:var(--font-mono); margin-bottom:8px; }
+.stat-value{ font-family:var(--font-mono); font-size:26px; font-weight:600; font-variant-numeric:tabular-nums; }
+.stat-unit{ font-size:13px; color:var(--text-muted); font-weight:400; margin-left:3px; }
+.stat-delta{ font-size:12px; margin-top:5px; color:var(--text-muted); }
+.stat-delta.up{ color:var(--teal); }
+.stat-delta.warn{ color:var(--clay); }
+section{ margin-top:44px; }
+.section-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:16px; gap:16px; flex-wrap:wrap; }
+.section-title{ font-family:var(--font-display); font-weight:600; font-size:19px; display:flex; align-items:center; gap:10px; }
+.section-index{ font-family:var(--font-mono); color:var(--amber); font-size:13px; }
+.section-note{ font-size:13px; color:var(--text-muted); max-width:440px; text-align:right; }
+.panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:22px; }
+.panel-split{ display:grid; grid-template-columns:1.4fr 1fr; gap:16px; }
+.panel-triple{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+@media (max-width:860px){ .panel-split, .panel-triple{ grid-template-columns:1fr; } .stat-strip{ grid-template-columns:repeat(2,1fr); } }
+.chart-box{ position:relative; height:260px; }
+.chart-box.tall{ height:320px; }
+.svg-chart{ width:100%; height:100%; }
+.svg-chart svg{ width:100%; height:100%; display:block; overflow:visible; }
+.svg-chart text{ font-family:var(--font-mono); fill:var(--text-dim); font-size:10px; }
+.svg-chart .axis-line{ stroke:var(--border); stroke-width:1; }
+.svg-chart .grid-line{ stroke:var(--border-soft); stroke-width:1; }
+.svg-chart .data-point{ cursor:pointer; }
+.svg-chart .data-point:hover{ filter:brightness(1.3); }
+#chart-tooltip{ position:fixed; pointer-events:none; z-index:999; background:var(--bg-raised); border:1px solid var(--border); border-radius:6px; padding:8px 11px; font-family:var(--font-mono); font-size:12px; color:var(--text); box-shadow:0 8px 20px rgba(0,0,0,0.4); display:none; max-width:220px; line-height:1.5; }
+#chart-tooltip .tt-title{ font-family:var(--font-body); font-weight:600; color:var(--text); margin-bottom:3px; font-size:12.5px; }
+#chart-tooltip .tt-row{ color:var(--text-muted); }
+#chart-tooltip .tt-row b{ color:var(--text); font-weight:500; }
+.legend-row{ display:flex; gap:18px; flex-wrap:wrap; margin-top:14px; font-size:12px; color:var(--text-muted); }
+.legend-item{ display:flex; align-items:center; gap:6px; }
+.legend-swatch{ width:10px; height:10px; border-radius:2px; }
+.chart-caption{ font-family:var(--font-mono); font-size:0.64rem; color:var(--text-dim); margin-top:6px; text-align:center; }
+.insight-card{ background:var(--bg-raised); border:1px solid var(--border-soft); border-radius:10px; padding:16px 18px; display:flex; gap:12px; align-items:flex-start; }
+.insight-icon{ font-family:var(--font-mono); font-size:11px; padding:3px 7px; border-radius:4px; flex-shrink:0; margin-top:2px; white-space:nowrap; }
+.insight-icon.good{ background:var(--teal-dim); color:var(--teal); }
+.insight-icon.watch{ background:var(--amber-dim); color:var(--amber); }
+.insight-icon.flag{ background:var(--clay-dim); color:var(--clay); }
+.insight-text{ font-size:13.5px; color:var(--text); line-height:1.55; }
+.insight-text b{ color:var(--text); font-weight:600; }
+.dial-row{ display:flex; gap:22px; align-items:center; }
+.dial-num{ font-family:var(--font-mono); font-size:34px; font-weight:600; }
+.dial-label{ font-size:12px; color:var(--text-muted); margin-top:2px; }
+.badge{ display:inline-block; font-family:var(--font-mono); font-size:11px; padding:3px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:0.05em; }
+.badge.high, .badge.good{ background:var(--teal-dim); color:var(--teal); }
+.badge.moderate{ background:var(--amber-dim); color:var(--amber); }
+.badge.low, .badge.low-warn{ background:var(--clay-dim); color:var(--clay); }
+.balance-bars{ display:flex; flex-direction:column; gap:14px; margin-top:6px; }
+.balance-row{ display:grid; grid-template-columns:74px 1fr 44px; gap:10px; align-items:center; }
+.balance-name{ font-size:12px; color:var(--text-muted); }
+.balance-track{ height:8px; background:var(--bg-inset); border-radius:4px; position:relative; overflow:visible; }
+.balance-target{ position:absolute; top:-3px; bottom:-3px; border-left:1px dashed var(--text-dim); border-right:1px dashed var(--text-dim); }
+.balance-fill{ height:100%; border-radius:4px; }
+.balance-val{ font-family:var(--font-mono); font-size:12px; text-align:right; color:var(--text-muted); }
+.rec-panel{ border-left:4px solid var(--amber); }
+.rec-panel.tone-good{ border-left-color:var(--teal); }
+.rec-panel.tone-caution{ border-left-color:var(--clay); }
+.rec-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; flex-wrap:wrap; gap:8px; }
+.rec-eyebrow{ font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); }
+.rec-headline{ font-family:var(--font-display); font-size:19px; font-weight:600; margin-bottom:10px; }
+.tone-good .rec-headline{ color:var(--teal); }
+.tone-caution .rec-headline{ color:var(--clay); }
+.rec-notes{ list-style:none; display:flex; flex-direction:column; gap:6px; }
+.rec-notes li{ font-size:13.5px; color:var(--text-muted); line-height:1.5; padding-left:14px; position:relative; }
+.rec-notes li::before{ content:""; position:absolute; left:0; top:0.55em; width:5px; height:5px; border-radius:50%; background:var(--amber); }
+.tone-good .rec-notes li::before{ background:var(--teal); }
+.tone-caution .rec-notes li::before{ background:var(--clay); }
+.rec-disclaimer{ font-size:11px; color:var(--text-dim); margin-top:12px; font-style:italic; }
+.predict-list{ display:flex; flex-direction:column; gap:2px; }
+.predict-row{ display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid var(--border-soft); font-family:var(--font-mono); font-size:14px; }
+.predict-row.highlight{ background:var(--amber-dim); border-radius:6px; font-weight:600; border-bottom-color:transparent; }
+.predict-label{ color:var(--text-muted); font-family:var(--font-body); text-transform:uppercase; font-size:11px; letter-spacing:0.05em; }
+.predict-row.highlight .predict-label{ color:var(--amber); }
+.score-row{ display:flex; gap:26px; }
+.score-item b{ font-family:var(--font-mono); font-size:1.3rem; font-variant-numeric:tabular-nums; }
+.score-item span{ display:block; font-family:var(--font-body); font-size:0.65rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }
+.tab-row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px; }
+.tab-btn{ font-family:var(--font-mono); font-size:12px; padding:8px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg-raised); color:var(--text-muted); cursor:pointer; transition:all .15s ease; }
+.tab-btn:hover{ color:var(--text); border-color:var(--text-dim); }
+.tab-btn.active{ background:var(--amber-dim); color:var(--amber); border-color:var(--amber); }
+.split-meta{ display:flex; gap:26px; margin-bottom:16px; flex-wrap:wrap; }
+.split-meta-item .val{ font-family:var(--font-mono); font-size:18px; }
+.table-controls{ display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+select, input[type=text]{ font-family:var(--font-mono); font-size:12px; background:var(--bg-raised); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px 10px; outline:none; }
+select:focus, input:focus{ border-color:var(--amber); }
+table{ width:100%; border-collapse:collapse; font-size:13px; }
+thead th{ text-align:left; font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim); font-weight:500; padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; user-select:none; white-space:nowrap; }
+thead th:hover{ color:var(--text-muted); }
+thead th.sorted{ color:var(--amber); }
+tbody td{ padding:10px 12px; border-bottom:1px solid var(--border-soft); font-family:var(--font-mono); white-space:nowrap; }
+tbody td.name-cell{ font-family:var(--font-body); white-space:normal; }
+tbody tr:hover{ background:var(--bg-raised); }
+.type-pill{ font-family:var(--font-body); font-size:11px; padding:2px 8px; border-radius:20px; display:inline-block; }
+.type-pill.Long-Run{ background:var(--blue-dim); color:var(--blue); }
+.type-pill.Easy-Run{ background:var(--bg-inset); color:var(--text-muted); }
+.type-pill.Tempo{ background:var(--amber-dim); color:var(--amber); }
+.type-pill.Speed{ background:var(--clay-dim); color:var(--clay); }
+.type-pill.Benchmark{ background:var(--teal-dim); color:var(--teal); }
+.type-pill.Strides{ background:var(--bg-inset); color:var(--text-dim); }
+.table-scroll{ overflow-x:auto; }
+footer{ margin-top:56px; padding-top:22px; border-top:1px solid var(--border); display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; font-size:12.5px; color:var(--text-dim); }
+footer .update-note{ max-width:560px; }
+footer .update-note b{ color:var(--text-muted); }
+.empty{ color:var(--text-dim); font-size:0.85rem; }
 </style>
 </head>
 <body>
-<div class="wrap">
-<header class="top">
-  <h1>Training Dashboard</h1>
-  <div class="updated">Updated<br>2026-08-26 14:04 UTC</div>
-</header>
-
-<section>
-  <div class="race-card tone-caution">
-    <div class="race-head">
-      <div class="race-title">Half Marathon · November 8, 2026<span class="race-phase">Base</span></div>
-      <div class="race-days">10w 4d to go</div>
-    </div>
-    <div class="rec-headline">Lean toward an easy day or rest</div>
-    <ul class="rec-notes"><li>Training readiness: Low (38/100).</li><li>HRV status: Balanced.</li><li>Training load ratio: 0.94 — a sustainable range.</li><li>Only 5.0h of sleep last night.</li></ul>
-    <div class="rec-disclaimer">Generated from your Garmin metrics — not a substitute for how you actually feel or a coach's judgment.</div>
-  </div>
-</section>
-
-<section>
-  <h2>Today's Snapshot</h2>
-  <div class="stat-grid">
-    <div class="stat-tile">
-      <div class="stat-value">5.0<span style="font-size:0.9rem;color:var(--ink-muted)">h</span></div>
-      <div class="stat-label">Sleep</div>
-    </div>
-    <div class="stat-tile rhr-tile">
-      <div class="rhr-row">
+<div class="console-header">
+  <div class="wrap">
+    <div class="header-row">
+      <div class="brand-block">
         <div>
-          <div class="stat-value">54.0</div>
-          <div class="stat-label">Resting HR</div>
+          <span class="brand-eyebrow">Training Console</span>
+          <h1 id="hero-title">Build → Race</h1>
         </div>
-        <svg width="90" height="28" class="rhr-spark"><polyline points="0.0,14.9 15.0,4.0 30.0,18.5 45.0,11.3 60.0,24.0 75.0,18.5 90.0,14.9" class="rhr-line"></polyline><circle cx="90.0" cy="14.9" r="2.2" class="rhr-dot"></circle></svg>
       </div>
-      <div class="stat-sub">last 7 days</div>
+      <div class="sync-badge"><span class="sync-dot"></span><span id="sync-text">Synced from Garmin —</span></div>
     </div>
-    <div class="stat-tile">
-      <div class="stat-value">26</div>
-      <div class="stat-label">Avg Stress</div>
-    </div>
-    <div class="stat-tile rhr-tile">
-      <div class="rhr-row">
-        <div>
-          <div class="stat-value">—</div>
-          <div class="stat-label">VO2 Max</div>
-          
-        </div>
-        
-      </div>
-    </div>
+    <div class="countdown-strip" id="countdown-strip"></div>
   </div>
-</section>
-
-<section>
-  <h2>Recovery</h2>
-  <div class="stat-grid">
-    <div class="stat-tile">
-      <div class="stat-value">38</div>
-      <div class="stat-label">Training Readiness</div>
-      <div class="stat-sub">Low</div>
-    </div>
-    <div class="stat-tile">
-      <div class="stat-value">41</div>
-      <div class="stat-label">HRV (ms)</div>
-      <div class="stat-sub">Balanced</div>
-    </div>
-    <div class="stat-tile">
-      <div class="stat-value">50</div>
-      <div class="stat-label">Body Battery</div>
-    </div>
-  </div>
-</section>
-
-<section>
-  <h2>Insights</h2>
-  <ul class="insights"><li>Last week's mileage (8.4 mi) is 44% down vs the trailing 4-week average (15.0 mi).</li><li>Your last 4 weeks have averaged 24 sec/mi slower than the 4 weeks before that.</li><li>Longest run in this period: 7.18 mi (Bellevue - Run, Aug 22).</li><li>You ran in 12 of the last 12 weeks.</li><li>Total distance: 191.2 mi across 63 runs over this period.</li><li>This week's intensity minutes: 30 moderate + 47 vigorous (general guideline: 150 moderate or 75 vigorous per week).</li></ul>
-</section>
-
-<section>
-  <h2>Training Load · last 23 weeks</h2>
-  <div class="vol-scroll">
-    <div class="chart-stack">
-      <div class="vol-chart" style="width:644px"><div class="vol-bar" style="--h:26px" title="Week of 2026-03-02: 4.1 mi over 2 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">3/2</span></div><div class="vol-bar" style="--h:30px" title="Week of 2026-03-09: 4.8 mi over 2 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">3/9</span></div><div class="vol-bar" style="--h:27px" title="Week of 2026-03-23: 4.3 mi over 2 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">3/23</span></div><div class="vol-bar" style="--h:39px" title="Week of 2026-03-30: 6.2 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">3/30</span></div><div class="vol-bar" style="--h:42px" title="Week of 2026-04-06: 6.8 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">4/6</span></div><div class="vol-bar" style="--h:47px" title="Week of 2026-04-13: 7.5 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">4/13</span></div><div class="vol-bar" style="--h:36px" title="Week of 2026-04-20: 5.7 mi over 3 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">4/20</span></div><div class="vol-bar" style="--h:49px" title="Week of 2026-04-27: 7.8 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">4/27</span></div><div class="vol-bar" style="--h:51px" title="Week of 2026-05-04: 8.2 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">5/4</span></div><div class="vol-bar" style="--h:38px" title="Week of 2026-05-11: 6.1 mi over 2 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">5/11</span></div><div class="vol-bar" style="--h:47px" title="Week of 2026-05-18: 7.5 mi over 3 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">5/18</span></div><div class="vol-bar" style="--h:41px" title="Week of 2026-06-01: 6.6 mi over 2 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">6/1</span></div><div class="vol-bar" style="--h:35px" title="Week of 2026-06-08: 5.6 mi over 2 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">6/8</span></div><div class="vol-bar" style="--h:44px" title="Week of 2026-06-22: 7.1 mi over 2 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">6/22</span></div><div class="vol-bar" style="--h:36px" title="Week of 2026-06-29: 5.7 mi over 2 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">6/29</span></div><div class="vol-bar" style="--h:62px" title="Week of 2026-07-06: 10.0 mi over 4 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">7/6</span></div><div class="vol-bar" style="--h:81px" title="Week of 2026-07-13: 13.1 mi over 4 run(s)"><div class="vol-bar-fill vol-step-3"></div><span class="vol-bar-label">7/13</span></div><div class="vol-bar" style="--h:91px" title="Week of 2026-07-20: 14.6 mi over 4 run(s)"><div class="vol-bar-fill vol-step-4"></div><span class="vol-bar-label">7/20</span></div><div class="vol-bar" style="--h:93px" title="Week of 2026-07-27: 15.0 mi over 4 run(s)"><div class="vol-bar-fill vol-step-4"></div><span class="vol-bar-label">7/27</span></div><div class="vol-bar" style="--h:100px" title="Week of 2026-08-03: 16.1 mi over 4 run(s)"><div class="vol-bar-fill vol-step-4"></div><span class="vol-bar-label">8/3</span></div><div class="vol-bar" style="--h:89px" title="Week of 2026-08-10: 14.3 mi over 3 run(s)"><div class="vol-bar-fill vol-step-4"></div><span class="vol-bar-label">8/10</span></div><div class="vol-bar" style="--h:52px" title="Week of 2026-08-17: 8.4 mi over 2 run(s)"><div class="vol-bar-fill vol-step-2"></div><span class="vol-bar-label">8/17</span></div><div class="vol-bar" style="--h:34px" title="Week of 2026-08-24: 5.5 mi over 1 run(s)"><div class="vol-bar-fill vol-step-1"></div><span class="vol-bar-label">8/24</span></div></div>
-      <svg width="644" height="70" class="pace-svg"><path d="M14.0,54 L14.0,35.9 L42.0,46.6 L70.0,16.7 L98.0,30.6 L126.0,21.8 L154.0,19.1 L182.0,17.6 L210.0,24.0 L238.0,22.5 L266.0,30.8 L294.0,14.6 L322.0,29.0 L350.0,14.0 L378.0,20.5 L406.0,43.9 L434.0,31.3 L462.0,22.8 L490.0,33.2 L518.0,37.9 L546.0,30.7 L574.0,30.6 L602.0,54.0 L630.0,40.7 L630.0,54 Z" class="pace-area"></path><polyline points="14.0,35.9 42.0,46.6 70.0,16.7 98.0,30.6 126.0,21.8 154.0,19.1 182.0,17.6 210.0,24.0 238.0,22.5 266.0,30.8 294.0,14.6 322.0,29.0 350.0,14.0 378.0,20.5 406.0,43.9 434.0,31.3 462.0,22.8 490.0,33.2 518.0,37.9 546.0,30.7 574.0,30.6 602.0,54.0 630.0,40.7" class="pace-line"></polyline><circle cx="14.0" cy="35.9" r="2.6" class="pace-dot"></circle><circle cx="42.0" cy="46.6" r="2.6" class="pace-dot"></circle><circle cx="70.0" cy="16.7" r="2.6" class="pace-dot"></circle><circle cx="98.0" cy="30.6" r="2.6" class="pace-dot"></circle><circle cx="126.0" cy="21.8" r="2.6" class="pace-dot"></circle><circle cx="154.0" cy="19.1" r="2.6" class="pace-dot"></circle><circle cx="182.0" cy="17.6" r="2.6" class="pace-dot"></circle><circle cx="210.0" cy="24.0" r="2.6" class="pace-dot"></circle><circle cx="238.0" cy="22.5" r="2.6" class="pace-dot"></circle><circle cx="266.0" cy="30.8" r="2.6" class="pace-dot"></circle><circle cx="294.0" cy="14.6" r="2.6" class="pace-dot"></circle><circle cx="322.0" cy="29.0" r="2.6" class="pace-dot"></circle><circle cx="350.0" cy="14.0" r="2.6" class="pace-dot"></circle><circle cx="378.0" cy="20.5" r="2.6" class="pace-dot"></circle><circle cx="406.0" cy="43.9" r="2.6" class="pace-dot"></circle><circle cx="434.0" cy="31.3" r="2.6" class="pace-dot"></circle><circle cx="462.0" cy="22.8" r="2.6" class="pace-dot"></circle><circle cx="490.0" cy="33.2" r="2.6" class="pace-dot"></circle><circle cx="518.0" cy="37.9" r="2.6" class="pace-dot"></circle><circle cx="546.0" cy="30.7" r="2.6" class="pace-dot"></circle><circle cx="574.0" cy="30.6" r="2.6" class="pace-dot"></circle><circle cx="602.0" cy="54.0" r="2.6" class="pace-dot"></circle><circle cx="630.0" cy="40.7" r="2.6" class="pace-dot"></circle><text x="622.0" y="32.7" class="pace-label" text-anchor="end">13:07/mi</text></svg>
-    </div>
-  </div>
-  <div class="chart-caption">Bars: weekly mileage · Line: weekly average pace (higher = faster)</div>
-</section>
-
-<section>
-  <h2>Fitness Trend</h2>
-  <div class="predict-list"><div class="predict-row"><span class="predict-label">5K</span><span class="predict-time">30:21</span></div><div class="predict-row"><span class="predict-label">10K</span><span class="predict-time">1:04:46</span></div><div class="predict-row highlight"><span class="predict-label">Half Marathon</span><span class="predict-time">2:28:29</span></div><div class="predict-row"><span class="predict-label">Marathon</span><span class="predict-time">5:33:45</span></div></div>
-  <div class="score-row">
-    <div class="score-item"><b>—</b><span>Endurance Score</span></div>
-    <div class="score-item"><b>—</b><span>Hill Score</span></div>
-  </div>
-</section>
-
-<section>
-  <h2>Most Recent Session</h2>
-  
-        <div class="run-summary">
-          <div class="name">Richmond - Intervals 5x800m</div>
-          <div class="meta">August 25, 2026</div>
-        </div>
-        <div class="ladder"><div class="seg seg-neutral" style="--w:17.168665308297026%" title="Lap 1: Warmup"></div><div class="seg seg-active" style="--w:6.822655166942983%" title="Lap 2: Active"></div><div class="seg seg-recovery" style="--w:5.870041298409239%" title="Lap 3: Recovery"></div><div class="seg seg-active" style="--w:6.575622183871335%" title="Lap 4: Active"></div><div class="seg seg-recovery" style="--w:6.011882616725221%" title="Lap 5: Recovery"></div><div class="seg seg-active" style="--w:6.757507925170045%" title="Lap 6: Active"></div><div class="seg seg-recovery" style="--w:7.165827096310533%" title="Lap 7: Recovery"></div><div class="seg seg-active" style="--w:7.501678332433835%" title="Lap 8: Active"></div><div class="seg seg-recovery" style="--w:7.6780677803819755%" title="Lap 9: Recovery"></div><div class="seg seg-active" style="--w:6.939024167756111%" title="Lap 10: Active"></div><div class="seg seg-neutral" style="--w:20.85850254642347%" title="Lap 11: Cooldown"></div><div class="seg seg-neutral" style="--w:1.5%" title="Lap 12: Cooldown"></div></div>
-        <div class="run-summary" style="margin-top:-4px;margin-bottom:10px;">
-          <div class="meta">5.50 mi · 1:12:10 ·
-          avg 13:07/mi · 151 bpm</div>
-        </div>
-        <div class="lap-row"><div class="lap-n">1</div><div class="lap-tag tag-warmup">Warmup</div><div class="lap-dist">1.00 mi</div><div class="lap-pace">12:23/mi</div><div class="lap-hr">146 bpm</div></div><div class="lap-row"><div class="lap-n">2</div><div class="lap-tag tag-active">Active</div><div class="lap-dist">0.50 mi</div><div class="lap-pace">9:54/mi</div><div class="lap-hr">167 bpm</div></div><div class="lap-row"><div class="lap-n">3</div><div class="lap-tag tag-recovery">Recovery</div><div class="lap-dist">0.25 mi</div><div class="lap-pace">17:03/mi</div><div class="lap-hr">147 bpm</div></div><div class="lap-row"><div class="lap-n">4</div><div class="lap-tag tag-active">Active</div><div class="lap-dist">0.50 mi</div><div class="lap-pace">9:33/mi</div><div class="lap-hr">167 bpm</div></div><div class="lap-row"><div class="lap-n">5</div><div class="lap-tag tag-recovery">Recovery</div><div class="lap-dist">0.25 mi</div><div class="lap-pace">17:27/mi</div><div class="lap-hr">152 bpm</div></div><div class="lap-row"><div class="lap-n">6</div><div class="lap-tag tag-active">Active</div><div class="lap-dist">0.50 mi</div><div class="lap-pace">9:49/mi</div><div class="lap-hr">168 bpm</div></div><div class="lap-row"><div class="lap-n">7</div><div class="lap-tag tag-recovery">Recovery</div><div class="lap-dist">0.25 mi</div><div class="lap-pace">20:48/mi</div><div class="lap-hr">141 bpm</div></div><div class="lap-row"><div class="lap-n">8</div><div class="lap-tag tag-active">Active</div><div class="lap-dist">0.50 mi</div><div class="lap-pace">10:53/mi</div><div class="lap-hr">159 bpm</div></div><div class="lap-row"><div class="lap-n">9</div><div class="lap-tag tag-recovery">Recovery</div><div class="lap-dist">0.25 mi</div><div class="lap-pace">22:18/mi</div><div class="lap-hr">133 bpm</div></div><div class="lap-row"><div class="lap-n">10</div><div class="lap-tag tag-active">Active</div><div class="lap-dist">0.50 mi</div><div class="lap-pace">10:04/mi</div><div class="lap-hr">158 bpm</div></div><div class="lap-row"><div class="lap-n">11</div><div class="lap-tag tag-cooldown">Cooldown</div><div class="lap-dist">1.00 mi</div><div class="lap-pace">15:03/mi</div><div class="lap-hr">145 bpm</div></div><div class="lap-row"><div class="lap-n">12</div><div class="lap-tag tag-cooldown">Cooldown</div><div class="lap-dist">0.02 mi</div><div class="lap-pace">24:23/mi</div><div class="lap-hr">153 bpm</div></div>
-        
-</section>
-
-<section>
-  <h2>Run Log · last 180 days (63 runs)</h2>
-  <div class="log-month">August 2026</div><div class="log-row"><div class="log-date">Aug 25</div><div class="log-name">Richmond - Intervals 5x800m</div><div class="log-stats"><span class="log-stat"><b>5.50</b> mi</span><span class="log-stat"><b>13:07</b>/mi</span><span class="log-stat"><b>151</b> bpm</span><span class="log-stat"><b>79</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 22</div><div class="log-name">Bellevue - Run</div><div class="log-stats"><span class="log-stat"><b>7.18</b> mi</span><span class="log-stat"><b>13:51</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>604</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 18</div><div class="log-name">Richmond - Tempo 1050</div><div class="log-stats"><span class="log-stat"><b>1.20</b> mi</span><span class="log-stat"><b>13:30</b>/mi</span><span class="log-stat"><b>144</b> bpm</span><span class="log-stat"><b>33</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 15</div><div class="log-name">New York Running</div><div class="log-stats"><span class="log-stat"><b>7.01</b> mi</span><span class="log-stat"><b>12:44</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>279</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 12</div><div class="log-name">Richmond - Tempo 1050</div><div class="log-stats"><span class="log-stat"><b>4.00</b> mi</span><span class="log-stat"><b>12:31</b>/mi</span><span class="log-stat"><b>161</b> bpm</span><span class="log-stat"><b>154</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 10</div><div class="log-name">Richmond - Wk1 Speed</div><div class="log-stats"><span class="log-stat"><b>3.31</b> mi</span><span class="log-stat"><b>12:26</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>125</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 8</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>6.81</b> mi</span><span class="log-stat"><b>12:52</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>210</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 6</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.26</b> mi</span><span class="log-stat"><b>12:25</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>125</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 4</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.76</b> mi</span><span class="log-stat"><b>12:29</b>/mi</span><span class="log-stat"><b>160</b> bpm</span><span class="log-stat"><b>75</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 3</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.28</b> mi</span><span class="log-stat"><b>12:21</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Aug 1</div><div class="log-name">Oakland - Run</div><div class="log-stats"><span class="log-stat"><b>6.21</b> mi</span><span class="log-stat"><b>14:05</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>125</b> ft</span></span></div><div class="log-month">July 2026</div><div class="log-row"><div class="log-date">Jul 30</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.28</b> mi</span><span class="log-stat"><b>12:08</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>115</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 28</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.28</b> mi</span><span class="log-stat"><b>12:16</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 27</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.27</b> mi</span><span class="log-stat"><b>12:13</b>/mi</span><span class="log-stat"><b>161</b> bpm</span><span class="log-stat"><b>59</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 25</div><div class="log-name">San Leandro - Run</div><div class="log-stats"><span class="log-stat"><b>6.18</b> mi</span><span class="log-stat"><b>13:08</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>79</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 23</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.28</b> mi</span><span class="log-stat"><b>12:20</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>52</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 22</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.26</b> mi</span><span class="log-stat"><b>12:29</b>/mi</span><span class="log-stat"><b>155</b> bpm</span><span class="log-stat"><b>52</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 21</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.91</b> mi</span><span class="log-stat"><b>12:33</b>/mi</span><span class="log-stat"><b>157</b> bpm</span><span class="log-stat"><b>69</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 19</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>5.24</b> mi</span><span class="log-stat"><b>12:15</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>138</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 17</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>3.25</b> mi</span><span class="log-stat"><b>12:16</b>/mi</span><span class="log-stat"><b>170</b> bpm</span><span class="log-stat"><b>121</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 15</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.27</b> mi</span><span class="log-stat"><b>12:15</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>66</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 14</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>2.32</b> mi</span><span class="log-stat"><b>11:57</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>62</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 12</div><div class="log-name">Richmond - Run</div><div class="log-stats"><span class="log-stat"><b>4.26</b> mi</span><span class="log-stat"><b>12:18</b>/mi</span><span class="log-stat"><b>166</b> bpm</span><span class="log-stat"><b>89</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 10</div><div class="log-name">Richmond - Benchmark Run</div><div class="log-stats"><span class="log-stat"><b>2.15</b> mi</span><span class="log-stat"><b>12:57</b>/mi</span><span class="log-stat"><b>148</b> bpm</span><span class="log-stat"><b>92</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 8</div><div class="log-name">Richmond Strides 4x40s</div><div class="log-stats"><span class="log-stat"><b>0.55</b> mi</span><span class="log-stat"><b>15:11</b>/mi</span><span class="log-stat"><b>146</b> bpm</span><span class="log-stat"><b>13</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 8</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.01</b> mi</span><span class="log-stat"><b>12:26</b>/mi</span><span class="log-stat"><b>162</b> bpm</span><span class="log-stat"><b>157</b> ft</span></span></div><div class="log-row"><div class="log-date">Jul 4</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.51</b> mi</span><span class="log-stat"><b>13:24</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>95</b> ft</span></span></div><div class="log-month">June 2026</div><div class="log-row"><div class="log-date">Jun 30</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.21</b> mi</span><span class="log-stat"><b>13:07</b>/mi</span><span class="log-stat"><b>141</b> bpm</span><span class="log-stat"><b>82</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 28</div><div class="log-name">Alameda Running</div><div class="log-stats"><span class="log-stat"><b>5.04</b> mi</span><span class="log-stat"><b>12:06</b>/mi</span><span class="log-stat"><b>167</b> bpm</span><span class="log-stat"><b>59</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 23</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.01</b> mi</span><span class="log-stat"><b>12:03</b>/mi</span><span class="log-stat"><b>166</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 13</div><div class="log-name">Medford Running</div><div class="log-stats"><span class="log-stat"><b>3.04</b> mi</span><span class="log-stat"><b>11:56</b>/mi</span><span class="log-stat"><b>161</b> bpm</span><span class="log-stat"><b>141</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 9</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.53</b> mi</span><span class="log-stat"><b>11:32</b>/mi</span><span class="log-stat"><b>164</b> bpm</span><span class="log-stat"><b>39</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 7</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>4.05</b> mi</span><span class="log-stat"><b>12:19</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Jun 5</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.59</b> mi</span><span class="log-stat"><b>12:50</b>/mi</span><span class="log-stat"><b>168</b> bpm</span><span class="log-stat"><b>59</b> ft</span></span></div><div class="log-month">May 2026</div><div class="log-row"><div class="log-date">May 24</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.01</b> mi</span><span class="log-stat"><b>11:34</b>/mi</span><span class="log-stat"><b>162</b> bpm</span><span class="log-stat"><b>102</b> ft</span></span></div><div class="log-row"><div class="log-date">May 21</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.02</b> mi</span><span class="log-stat"><b>11:25</b>/mi</span><span class="log-stat"><b>156</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">May 19</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.51</b> mi</span><span class="log-stat"><b>12:20</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">May 13</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.54</b> mi</span><span class="log-stat"><b>12:52</b>/mi</span><span class="log-stat"><b>152</b> bpm</span><span class="log-stat"><b>39</b> ft</span></span></div><div class="log-row"><div class="log-date">May 11</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.51</b> mi</span><span class="log-stat"><b>12:15</b>/mi</span><span class="log-stat"><b>154</b> bpm</span><span class="log-stat"><b>39</b> ft</span></span></div><div class="log-row"><div class="log-date">May 9</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.52</b> mi</span><span class="log-stat"><b>12:19</b>/mi</span><span class="log-stat"><b>158</b> bpm</span><span class="log-stat"><b>39</b> ft</span></span></div><div class="log-row"><div class="log-date">May 7</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.01</b> mi</span><span class="log-stat"><b>11:35</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>56</b> ft</span></span></div><div class="log-row"><div class="log-date">May 5</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.67</b> mi</span><span class="log-stat"><b>12:29</b>/mi</span><span class="log-stat"><b>157</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">May 2</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.26</b> mi</span><span class="log-stat"><b>12:22</b>/mi</span><span class="log-stat"><b>154</b> bpm</span><span class="log-stat"><b>75</b> ft</span></span></div><div class="log-month">April 2026</div><div class="log-row"><div class="log-date">Apr 30</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.07</b> mi</span><span class="log-stat"><b>12:08</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>26</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 28</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.51</b> mi</span><span class="log-stat"><b>12:14</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 26</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.05</b> mi</span><span class="log-stat"><b>12:30</b>/mi</span><span class="log-stat"><b>157</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 25</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>1.53</b> mi</span><span class="log-stat"><b>11:25</b>/mi</span><span class="log-stat"><b>155</b> bpm</span><span class="log-stat"><b>13</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 22</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.15</b> mi</span><span class="log-stat"><b>11:45</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>30</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 19</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>3.01</b> mi</span><span class="log-stat"><b>12:06</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 16</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.01</b> mi</span><span class="log-stat"><b>11:55</b>/mi</span><span class="log-stat"><b>161</b> bpm</span><span class="log-stat"><b>26</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 14</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.53</b> mi</span><span class="log-stat"><b>11:59</b>/mi</span><span class="log-stat"><b>163</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 12</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.78</b> mi</span><span class="log-stat"><b>12:01</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>62</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 9</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>1.52</b> mi</span><span class="log-stat"><b>11:43</b>/mi</span><span class="log-stat"><b>159</b> bpm</span><span class="log-stat"><b>23</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 6</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.45</b> mi</span><span class="log-stat"><b>12:35</b>/mi</span><span class="log-stat"><b>152</b> bpm</span><span class="log-stat"><b>30</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 5</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>1.57</b> mi</span><span class="log-stat"><b>11:29</b>/mi</span><span class="log-stat"><b>160</b> bpm</span><span class="log-stat"><b>23</b> ft</span></span></div><div class="log-row"><div class="log-date">Apr 1</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.59</b> mi</span><span class="log-stat"><b>13:30</b>/mi</span><span class="log-stat"><b>149</b> bpm</span><span class="log-stat"><b>36</b> ft</span></span></div><div class="log-month">March 2026</div><div class="log-row"><div class="log-date">Mar 30</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.07</b> mi</span><span class="log-stat"><b>12:20</b>/mi</span><span class="log-stat"><b>164</b> bpm</span><span class="log-stat"><b>7</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 25</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.16</b> mi</span><span class="log-stat"><b>12:03</b>/mi</span><span class="log-stat"><b>170</b> bpm</span><span class="log-stat"><b>30</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 23</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.18</b> mi</span><span class="log-stat"><b>11:44</b>/mi</span><span class="log-stat"><b>173</b> bpm</span><span class="log-stat"><b>30</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 15</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.00</b> mi</span><span class="log-stat"><b>13:19</b>/mi</span><span class="log-stat"><b>152</b> bpm</span><span class="log-stat"><b>23</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 9</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.78</b> mi</span><span class="log-stat"><b>13:30</b>/mi</span><span class="log-stat"><b>154</b> bpm</span><span class="log-stat"><b>46</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 6</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.05</b> mi</span><span class="log-stat"><b>13:03</b>/mi</span><span class="log-stat"><b>165</b> bpm</span><span class="log-stat"><b>49</b> ft</span></span></div><div class="log-row"><div class="log-date">Mar 2</div><div class="log-name">Richmond Running</div><div class="log-stats"><span class="log-stat"><b>2.09</b> mi</span><span class="log-stat"><b>12:42</b>/mi</span><span class="log-stat"><b>155</b> bpm</span><span class="log-stat"><b>30</b> ft</span></span></div>
-</section>
-
-<footer>Garmin Connect → GitHub Actions → GitHub Pages · runs daily</footer>
 </div>
+<div class="wrap">
+  <div id="boot-errors" class="boot-errors" style="display:none;"></div>
+  <div class="stat-strip" id="hero-stats"></div>
+
+  <section>
+    <div class="panel rec-panel" id="rec-panel"></div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div class="section-title"><span class="section-index">01</span> Weekly Volume &amp; Training Load</div>
+      <div class="section-note">Mileage by week against your long run distance and weekly run count.</div>
+    </div>
+    <div class="panel">
+      <div class="chart-box tall"><div id="chart-volume" class="svg-chart"></div></div>
+      <div class="legend-row">
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--amber)"></span>Weekly miles</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--blue)"></span>Long run distance</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--teal); border-radius:50%;"></span>Runs per week</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div class="section-title"><span class="section-index">02</span> Pace Progression</div>
+      <div class="section-note">Every run's average pace, colored by workout type, with a 5-run rolling average.</div>
+    </div>
+    <div class="panel">
+      <div class="chart-box tall"><div id="chart-pace" class="svg-chart"></div></div>
+      <div class="legend-row" id="pace-legend"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div class="section-title"><span class="section-index">03</span> What The Data Is Saying</div>
+      <div class="section-note">Rule-based pattern detection — not a live model call — so it runs free on every sync.</div>
+    </div>
+    <div id="insights" style="display:flex; flex-direction:column; gap:10px;"></div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div class="section-title"><span class="section-index">04</span> Recovery &amp; Readiness</div>
+      <div class="section-note">Today's readiness, HRV trend, and how training effort has split across intensity bands.</div>
+    </div>
+    <div class="panel-triple">
+      <div class="panel">
+        <div class="stat-label">Training Readiness — Today</div>
+        <div class="dial-row" style="margin-top:10px;">
+          <div>
+            <div class="dial-num" id="readiness-score">—</div>
+            <div class="dial-label">out of 100</div>
+          </div>
+          <div>
+            <span class="badge" id="readiness-badge">—</span>
+          </div>
+        </div>
+        <div style="margin-top:18px; padding-top:16px; border-top:1px solid var(--border-soft);">
+          <div class="stat-label">Training Status</div>
+          <div style="display:flex; align-items:baseline; gap:8px; margin-top:8px; flex-wrap:wrap;">
+            <span class="badge good" id="training-status-badge">—</span>
+            <span class="dial-label" id="training-acwr"></span>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="stat-label">HRV Trend</div>
+        <div class="chart-box" style="height:190px; margin-top:10px;"><div id="chart-hrv" class="svg-chart"></div></div>
+      </div>
+      <div class="panel">
+        <div class="stat-label">Effort Mix — Last 4 Weeks</div>
+        <div class="balance-bars" id="balance-bars"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div class="section-title"><span class="section-index">05</span> Fitness Trend</div>
+      <div class="section-note">Garmin's race-time predictions and fitness scores from current training data.</div>
+    </div>
+    <div class="panel-split">
+      <div class="panel">
+        <div class="predict-list" id="predict-list"></div>
+      </div>
+      <div class="panel">
+        <div class="score-row" id="score-row"></div>
+        <div class="chart-box" style="height:150px; margin-top:16px;"><div id="chart-vo2" class="svg-chart"></div></div>
+        <div class="chart-caption">VO2 max trend</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div class="section-title"><span class="section-index">06</span> Long Run Splits</div>
+      <div class="section-note">Mile-by-mile pace, heart rate and elevation for each long run this cycle.</div>
+    </div>
+    <div class="panel" id="splits-panel">
+      <div class="tab-row" id="split-tabs"></div>
+      <div class="split-meta" id="split-meta"></div>
+      <div class="chart-box tall"><div id="chart-splits" class="svg-chart"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div class="section-title"><span class="section-index">07</span> Full Run Log</div>
+      <div class="section-note" id="table-note">Click a column to sort.</div>
+    </div>
+    <div class="panel">
+      <div class="table-controls">
+        <select id="filter-type"><option value="">All types</option></select>
+        <input type="text" id="filter-search" placeholder="search run name…">
+        <span class="dial-label" id="table-count" style="margin-left:auto;"></span>
+      </div>
+      <div class="table-scroll">
+        <table id="run-table">
+          <thead>
+            <tr>
+              <th data-key="date">Date</th>
+              <th data-key="name">Run</th>
+              <th data-key="type">Type</th>
+              <th data-key="distMi">Dist</th>
+              <th data-key="durMin">Time</th>
+              <th data-key="paceMinMi">Pace</th>
+              <th data-key="avgHr">Avg HR</th>
+              <th data-key="maxHr">Max HR</th>
+              <th data-key="elevGainFt">Elev+</th>
+            </tr>
+          </thead>
+          <tbody id="run-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="update-note"><b>Keeping this current:</b> synced from Garmin through <span id="footer-sync-date"></span> · runs daily via GitHub Actions.</div>
+    <div>Source: Garmin Connect</div>
+  </footer>
+</div>
+<div id="chart-tooltip"></div>
+<script>const DATA = {"meta": {"lastSynced": "2026-08-26", "raceDate": "2026-11-08", "raceName": "Half Marathon", "daysLeft": 74, "weeksLeft": 10.6, "phase": "Base", "syncRangeStart": "2026-02-27", "syncRangeEnd": "2026-08-26"}, "recommendation": {"headline": "Lean toward an easy day or rest", "notes": ["Training readiness: Low (38/100).", "HRV status: Balanced.", "Training load ratio: 0.94 \u2014 a sustainable range.", "Only 5.0h of sleep last night."], "tone": "caution"}, "runs": [{"id": 24118171520, "name": "Richmond - Intervals 5x800m", "date": "2026-08-25", "dateLabel": "Aug 25", "distMi": 5.5, "durMin": 72.2, "paceMinMi": 13.124344060678466, "avgHr": 151.0, "maxHr": 178.0, "elevGainFt": 79, "type": "Speed"}, {"id": 24075306060, "name": "Bellevue - Run", "date": "2026-08-22", "dateLabel": "Aug 22", "distMi": 7.18, "durMin": 99.5, "paceMinMi": 13.856281691052486, "avgHr": 158.0, "maxHr": 180.0, "elevGainFt": 604, "type": "Long Run"}, {"id": 24030574349, "name": "Richmond - Tempo 1050", "date": "2026-08-18", "dateLabel": "Aug 18", "distMi": 1.2, "durMin": 16.1, "paceMinMi": 13.507409977515584, "avgHr": 144.0, "maxHr": 158.0, "elevGainFt": 33, "type": "Tempo"}, {"id": 23985898248, "name": "New York Running", "date": "2026-08-15", "dateLabel": "Aug 15", "distMi": 7.01, "durMin": 89.2, "paceMinMi": 12.726812187799789, "avgHr": 158.0, "maxHr": 178.0, "elevGainFt": 279, "type": "Long Run"}, {"id": 23956905466, "name": "Richmond - Tempo 1050", "date": "2026-08-12", "dateLabel": "Aug 12", "distMi": 4.0, "durMin": 50.2, "paceMinMi": 12.523727444574893, "avgHr": 161.0, "maxHr": 178.0, "elevGainFt": 154, "type": "Tempo"}, {"id": 23930460733, "name": "Richmond - Wk1 Speed", "date": "2026-08-10", "dateLabel": "Aug 10", "distMi": 3.31, "durMin": 41.1, "paceMinMi": 12.426750970745928, "avgHr": 158.0, "maxHr": 182.0, "elevGainFt": 125, "type": "Speed"}, {"id": 23902614687, "name": "Richmond - Run", "date": "2026-08-08", "dateLabel": "Aug 8", "distMi": 6.81, "durMin": 87.7, "paceMinMi": 12.874762417261211, "avgHr": 158.0, "maxHr": 173.0, "elevGainFt": 210, "type": "Long Run"}, {"id": 23881881028, "name": "Richmond - Run", "date": "2026-08-06", "dateLabel": "Aug 6", "distMi": 3.26, "durMin": 40.5, "paceMinMi": 12.42447723807137, "avgHr": 163.0, "maxHr": 181.0, "elevGainFt": 125, "type": "Easy Run"}, {"id": 23856772264, "name": "Richmond - Run", "date": "2026-08-04", "dateLabel": "Aug 4", "distMi": 2.76, "durMin": 34.4, "paceMinMi": 12.487602421914302, "avgHr": 160.0, "maxHr": 173.0, "elevGainFt": 75, "type": "Easy Run"}, {"id": 23843304523, "name": "Richmond - Run", "date": "2026-08-03", "dateLabel": "Aug 3", "distMi": 3.28, "durMin": 40.4, "paceMinMi": 12.342268113176269, "avgHr": 159.0, "maxHr": 176.0, "elevGainFt": 46, "type": "Easy Run"}, {"id": 23815595965, "name": "Oakland - Run", "date": "2026-08-01", "dateLabel": "Aug 1", "distMi": 6.21, "durMin": 87.6, "paceMinMi": 14.09021629054917, "avgHr": 158.0, "maxHr": 180.0, "elevGainFt": 125, "type": "Long Run"}, {"id": 23795590917, "name": "Richmond - Run", "date": "2026-07-30", "dateLabel": "Jul 30", "distMi": 3.28, "durMin": 39.8, "paceMinMi": 12.133190769246989, "avgHr": 163.0, "maxHr": 178.0, "elevGainFt": 115, "type": "Easy Run"}, {"id": 23771048983, "name": "Richmond - Run", "date": "2026-07-28", "dateLabel": "Jul 28", "distMi": 2.28, "durMin": 27.9, "paceMinMi": 12.25968495561207, "avgHr": 158.0, "maxHr": 170.0, "elevGainFt": 36, "type": "Easy Run"}, {"id": 23757494657, "name": "Richmond - Run", "date": "2026-07-27", "dateLabel": "Jul 27", "distMi": 3.27, "durMin": 39.9, "paceMinMi": 12.214513800943587, "avgHr": 161.0, "maxHr": 175.0, "elevGainFt": 59, "type": "Easy Run"}, {"id": 23730310582, "name": "San Leandro - Run", "date": "2026-07-25", "dateLabel": "Jul 25", "distMi": 6.18, "durMin": 81.2, "paceMinMi": 13.126445786753255, "avgHr": 163.0, "maxHr": 180.0, "elevGainFt": 79, "type": "Long Run"}, {"id": 23710290386, "name": "Richmond - Run", "date": "2026-07-23", "dateLabel": "Jul 23", "distMi": 3.28, "durMin": 40.4, "paceMinMi": 12.334919963870455, "avgHr": 158.0, "maxHr": 175.0, "elevGainFt": 52, "type": "Easy Run"}, {"id": 23698044915, "name": "Richmond - Run", "date": "2026-07-22", "dateLabel": "Jul 22", "distMi": 2.26, "durMin": 28.2, "paceMinMi": 12.486798418033514, "avgHr": 155.0, "maxHr": 173.0, "elevGainFt": 52, "type": "Easy Run"}, {"id": 23685266085, "name": "Richmond - Run", "date": "2026-07-21", "dateLabel": "Jul 21", "distMi": 2.91, "durMin": 36.5, "paceMinMi": 12.550235550652436, "avgHr": 157.0, "maxHr": 179.0, "elevGainFt": 69, "type": "Easy Run"}, {"id": 23656827894, "name": "Richmond - Run", "date": "2026-07-19", "dateLabel": "Jul 19", "distMi": 5.24, "durMin": 64.2, "paceMinMi": 12.252338283790072, "avgHr": 163.0, "maxHr": 180.0, "elevGainFt": 138, "type": "Long Run"}, {"id": 23636034133, "name": "Richmond - Run", "date": "2026-07-17", "dateLabel": "Jul 17", "distMi": 3.25, "durMin": 39.9, "paceMinMi": 12.27389951578998, "avgHr": 170.0, "maxHr": 181.0, "elevGainFt": 121, "type": "Easy Run"}, {"id": 23614034439, "name": "Richmond - Run", "date": "2026-07-15", "dateLabel": "Jul 15", "distMi": 2.27, "durMin": 27.8, "paceMinMi": 12.2439402311931, "avgHr": 163.0, "maxHr": 180.0, "elevGainFt": 66, "type": "Easy Run"}, {"id": 23601985362, "name": "Richmond - Run", "date": "2026-07-14", "dateLabel": "Jul 14", "distMi": 2.32, "durMin": 27.8, "paceMinMi": 11.95471978676131, "avgHr": 158.0, "maxHr": 169.0, "elevGainFt": 62, "type": "Easy Run"}, {"id": 23574074532, "name": "Richmond - Run", "date": "2026-07-12", "dateLabel": "Jul 12", "distMi": 4.26, "durMin": 52.4, "paceMinMi": 12.294626926554082, "avgHr": 166.0, "maxHr": 179.0, "elevGainFt": 89, "type": "Long Run"}, {"id": 23552783814, "name": "Richmond - Benchmark Run", "date": "2026-07-10", "dateLabel": "Jul 10", "distMi": 2.15, "durMin": 27.9, "paceMinMi": 12.9557481301274, "avgHr": 148.0, "maxHr": 177.0, "elevGainFt": 92, "type": "Benchmark"}, {"id": 23530071989, "name": "Richmond Strides 4x40s", "date": "2026-07-08", "dateLabel": "Jul 8", "distMi": 0.55, "durMin": 8.3, "paceMinMi": 15.19062801880801, "avgHr": 146.0, "maxHr": 164.0, "elevGainFt": 13, "type": "Strides"}, {"id": 23530003735, "name": "Richmond Running", "date": "2026-07-08", "dateLabel": "Jul 8", "distMi": 3.01, "durMin": 37.4, "paceMinMi": 12.430382978852277, "avgHr": 162.0, "maxHr": 178.0, "elevGainFt": 157, "type": "Easy Run"}, {"id": 23479731674, "name": "Richmond Running", "date": "2026-07-04", "dateLabel": "Jul 4", "distMi": 3.51, "durMin": 47.1, "paceMinMi": 13.395956962363762, "avgHr": 158.0, "maxHr": 178.0, "elevGainFt": 95, "type": "Easy Run"}, {"id": 23437289147, "name": "Richmond Running", "date": "2026-06-30", "dateLabel": "Jun 30", "distMi": 2.21, "durMin": 28.9, "paceMinMi": 13.111120860512896, "avgHr": 141.0, "maxHr": 170.0, "elevGainFt": 82, "type": "Easy Run"}, {"id": 23410015213, "name": "Alameda Running", "date": "2026-06-28", "dateLabel": "Jun 28", "distMi": 5.04, "durMin": 60.9, "paceMinMi": 12.092736054384085, "avgHr": 167.0, "maxHr": 194.0, "elevGainFt": 59, "type": "Long Run"}, {"id": 23358944679, "name": "Richmond Running", "date": "2026-06-23", "dateLabel": "Jun 23", "distMi": 2.01, "durMin": 24.2, "paceMinMi": 12.049088959601546, "avgHr": 166.0, "maxHr": 183.0, "elevGainFt": 36, "type": "Easy Run"}, {"id": 23235576564, "name": "Medford Running", "date": "2026-06-13", "dateLabel": "Jun 13", "distMi": 3.04, "durMin": 36.3, "paceMinMi": 11.928498362540775, "avgHr": 161.0, "maxHr": 180.0, "elevGainFt": 141, "type": "Easy Run"}, {"id": 23194933254, "name": "Richmond Running", "date": "2026-06-09", "dateLabel": "Jun 9", "distMi": 2.53, "durMin": 29.1, "paceMinMi": 11.530869499004293, "avgHr": 164.0, "maxHr": 181.0, "elevGainFt": 39, "type": "Easy Run"}, {"id": 23167620124, "name": "Richmond Running", "date": "2026-06-07", "dateLabel": "Jun 7", "distMi": 4.05, "durMin": 49.9, "paceMinMi": 12.32198016063975, "avgHr": 163.0, "maxHr": 185.0, "elevGainFt": 46, "type": "Long Run"}, {"id": 23145182192, "name": "Richmond Running", "date": "2026-06-05", "dateLabel": "Jun 5", "distMi": 2.59, "durMin": 33.2, "paceMinMi": 12.827352842159474, "avgHr": 168.0, "maxHr": 185.0, "elevGainFt": 59, "type": "Easy Run"}, {"id": 22998606436, "name": "Richmond Running", "date": "2026-05-24", "dateLabel": "May 24", "distMi": 3.01, "durMin": 34.8, "paceMinMi": 11.563669272370293, "avgHr": 162.0, "maxHr": 177.0, "elevGainFt": 102, "type": "Easy Run"}, {"id": 22966683858, "name": "Richmond Running", "date": "2026-05-21", "dateLabel": "May 21", "distMi": 2.02, "durMin": 23.1, "paceMinMi": 11.419048875894351, "avgHr": 156.0, "maxHr": 169.0, "elevGainFt": 36, "type": "Easy Run"}, {"id": 22943257556, "name": "Richmond Running", "date": "2026-05-19", "dateLabel": "May 19", "distMi": 2.51, "durMin": 30.9, "paceMinMi": 12.331371693631935, "avgHr": 159.0, "maxHr": 181.0, "elevGainFt": 36, "type": "Easy Run"}, {"id": 22873379806, "name": "Richmond Running", "date": "2026-05-13", "dateLabel": "May 13", "distMi": 3.54, "durMin": 45.6, "paceMinMi": 12.865542240630424, "avgHr": 152.0, "maxHr": 168.0, "elevGainFt": 39, "type": "Easy Run"}, {"id": 22849254793, "name": "Richmond Running", "date": "2026-05-11", "dateLabel": "May 11", "distMi": 2.51, "durMin": 30.8, "paceMinMi": 12.257279479473647, "avgHr": 154.0, "maxHr": 175.0, "elevGainFt": 39, "type": "Easy Run"}, {"id": 22823669319, "name": "Richmond Running", "date": "2026-05-09", "dateLabel": "May 9", "distMi": 3.52, "durMin": 43.3, "paceMinMi": 12.308520922657118, "avgHr": 158.0, "maxHr": 171.0, "elevGainFt": 39, "type": "Easy Run"}, {"id": 22803251907, "name": "Richmond Running", "date": "2026-05-07", "dateLabel": "May 7", "distMi": 2.01, "durMin": 23.3, "paceMinMi": 11.583564106967623, "avgHr": 159.0, "maxHr": 175.0, "elevGainFt": 56, "type": "Easy Run"}, {"id": 22779837318, "name": "Richmond Running", "date": "2026-05-05", "dateLabel": "May 5", "distMi": 2.67, "durMin": 33.3, "paceMinMi": 12.475762080079507, "avgHr": 157.0, "maxHr": 180.0, "elevGainFt": 36, "type": "Easy Run"}, {"id": 22739909617, "name": "Richmond Running", "date": "2026-05-02", "dateLabel": "May 2", "distMi": 3.26, "durMin": 40.3, "paceMinMi": 12.362785690729924, "avgHr": 154.0, "maxHr": 171.0, "elevGainFt": 75, "type": "Easy Run"}, {"id": 22719770927, "name": "Richmond Running", "date": "2026-04-30", "dateLabel": "Apr 30", "distMi": 2.07, "durMin": 25.2, "paceMinMi": 12.13292944119534, "avgHr": 159.0, "maxHr": 178.0, "elevGainFt": 26, "type": "Easy Run"}, {"id": 22696653513, "name": "Richmond Running", "date": "2026-04-28", "dateLabel": "Apr 28", "distMi": 2.51, "durMin": 30.7, "paceMinMi": 12.241390757349443, "avgHr": 159.0, "maxHr": 176.0, "elevGainFt": 36, "type": "Easy Run"}, {"id": 22672148627, "name": "Richmond Running", "date": "2026-04-26", "dateLabel": "Apr 26", "distMi": 2.05, "durMin": 25.7, "paceMinMi": 12.50116264687752, "avgHr": 157.0, "maxHr": 175.0, "elevGainFt": 46, "type": "Easy Run"}, {"id": 22658259802, "name": "Richmond Running", "date": "2026-04-25", "dateLabel": "Apr 25", "distMi": 1.53, "durMin": 17.4, "paceMinMi": 11.410021379751061, "avgHr": 155.0, "maxHr": 172.0, "elevGainFt": 13, "type": "Easy Run"}, {"id": 22625459695, "name": "Richmond Running", "date": "2026-04-22", "dateLabel": "Apr 22", "distMi": 2.15, "durMin": 25.3, "paceMinMi": 11.757870718332374, "avgHr": 159.0, "maxHr": 175.0, "elevGainFt": 30, "type": "Easy Run"}, {"id": 22586835318, "name": "Richmond Running", "date": "2026-04-19", "dateLabel": "Apr 19", "distMi": 3.01, "durMin": 36.4, "paceMinMi": 12.098675042292914, "avgHr": 163.0, "maxHr": 179.0, "elevGainFt": 46, "type": "Easy Run"}, {"id": 22553820393, "name": "Richmond Running", "date": "2026-04-16", "dateLabel": "Apr 16", "distMi": 2.01, "durMin": 23.9, "paceMinMi": 11.912872013631828, "avgHr": 161.0, "maxHr": 179.0, "elevGainFt": 26, "type": "Easy Run"}, {"id": 22529904826, "name": "Richmond Running", "date": "2026-04-14", "dateLabel": "Apr 14", "distMi": 2.53, "durMin": 30.3, "paceMinMi": 11.979061034324358, "avgHr": 163.0, "maxHr": 180.0, "elevGainFt": 46, "type": "Easy Run"}, {"id": 22505633660, "name": "Richmond Running", "date": "2026-04-12", "dateLabel": "Apr 12", "distMi": 2.78, "durMin": 33.4, "paceMinMi": 12.008662176322426, "avgHr": 159.0, "maxHr": 172.0, "elevGainFt": 62, "type": "Easy Run"}, {"id": 22472226258, "name": "Richmond Running", "date": "2026-04-09", "dateLabel": "Apr 9", "distMi": 1.52, "durMin": 17.8, "paceMinMi": 11.709526559533977, "avgHr": 159.0, "maxHr": 178.0, "elevGainFt": 23, "type": "Easy Run"}, {"id": 22434240841, "name": "Richmond Running", "date": "2026-04-06", "dateLabel": "Apr 6", "distMi": 2.45, "durMin": 30.8, "paceMinMi": 12.580033456345292, "avgHr": 152.0, "maxHr": 174.0, "elevGainFt": 30, "type": "Easy Run"}, {"id": 22421742834, "name": "Richmond Running", "date": "2026-04-05", "dateLabel": "Apr 5", "distMi": 1.57, "durMin": 18.0, "paceMinMi": 11.479191561570591, "avgHr": 160.0, "maxHr": 174.0, "elevGainFt": 23, "type": "Easy Run"}, {"id": 22378003727, "name": "Richmond Running", "date": "2026-04-01", "dateLabel": "Apr 1", "distMi": 2.59, "durMin": 35.0, "paceMinMi": 13.494875566476297, "avgHr": 149.0, "maxHr": 173.0, "elevGainFt": 36, "type": "Easy Run"}, {"id": 22354915457, "name": "Richmond Running", "date": "2026-03-30", "dateLabel": "Mar 30", "distMi": 2.07, "durMin": 25.6, "paceMinMi": 12.337247802974629, "avgHr": 164.0, "maxHr": 179.0, "elevGainFt": 7, "type": "Easy Run"}, {"id": 22301280224, "name": "Richmond Running", "date": "2026-03-25", "dateLabel": "Mar 25", "distMi": 2.16, "durMin": 26.0, "paceMinMi": 12.04530151425382, "avgHr": 170.0, "maxHr": 186.0, "elevGainFt": 30, "type": "Easy Run"}, {"id": 22277892558, "name": "Richmond Running", "date": "2026-03-23", "dateLabel": "Mar 23", "distMi": 2.18, "durMin": 25.6, "paceMinMi": 11.734421305808505, "avgHr": 173.0, "maxHr": 188.0, "elevGainFt": 30, "type": "Easy Run"}, {"id": 22187567764, "name": "Richmond Running", "date": "2026-03-15", "dateLabel": "Mar 15", "distMi": 2.0, "durMin": 26.7, "paceMinMi": 13.313357252637497, "avgHr": 152.0, "maxHr": 175.0, "elevGainFt": 23, "type": "Easy Run"}, {"id": 22121171530, "name": "Richmond Running", "date": "2026-03-09", "dateLabel": "Mar 9", "distMi": 2.78, "durMin": 37.6, "paceMinMi": 13.5077134742136, "avgHr": 154.0, "maxHr": 175.0, "elevGainFt": 46, "type": "Easy Run"}, {"id": 22086829660, "name": "Richmond Running", "date": "2026-03-06", "dateLabel": "Mar 6", "distMi": 2.05, "durMin": 26.8, "paceMinMi": 13.05586278690428, "avgHr": 165.0, "maxHr": 181.0, "elevGainFt": 49, "type": "Easy Run"}, {"id": 22041911394, "name": "Richmond Running", "date": "2026-03-02", "dateLabel": "Mar 2", "distMi": 2.09, "durMin": 26.5, "paceMinMi": 12.694153622298593, "avgHr": 155.0, "maxHr": 175.0, "elevGainFt": 30, "type": "Easy Run"}], "weekly": [{"weekStart": "2026-03-02", "label": "Mar 2", "miles": 4.1, "runs": 2, "longRunMiles": 0.0}, {"weekStart": "2026-03-09", "label": "Mar 9", "miles": 4.8, "runs": 2, "longRunMiles": 0.0}, {"weekStart": "2026-03-23", "label": "Mar 23", "miles": 4.3, "runs": 2, "longRunMiles": 0.0}, {"weekStart": "2026-03-30", "label": "Mar 30", "miles": 6.2, "runs": 3, "longRunMiles": 0.0}, {"weekStart": "2026-04-06", "label": "Apr 6", "miles": 6.8, "runs": 3, "longRunMiles": 0.0}, {"weekStart": "2026-04-13", "label": "Apr 13", "miles": 7.5, "runs": 3, "longRunMiles": 0.0}, {"weekStart": "2026-04-20", "label": "Apr 20", "miles": 5.7, "runs": 3, "longRunMiles": 0.0}, {"weekStart": "2026-04-27", "label": "Apr 27", "miles": 7.8, "runs": 3, "longRunMiles": 0.0}, {"weekStart": "2026-05-04", "label": "May 4", "miles": 8.2, "runs": 3, "longRunMiles": 0.0}, {"weekStart": "2026-05-11", "label": "May 11", "miles": 6.0, "runs": 2, "longRunMiles": 0.0}, {"weekStart": "2026-05-18", "label": "May 18", "miles": 7.5, "runs": 3, "longRunMiles": 0.0}, {"weekStart": "2026-06-01", "label": "Jun 1", "miles": 6.6, "runs": 2, "longRunMiles": 4.0}, {"weekStart": "2026-06-08", "label": "Jun 8", "miles": 5.6, "runs": 2, "longRunMiles": 0.0}, {"weekStart": "2026-06-22", "label": "Jun 22", "miles": 7.0, "runs": 2, "longRunMiles": 5.0}, {"weekStart": "2026-06-29", "label": "Jun 29", "miles": 5.7, "runs": 2, "longRunMiles": 0.0}, {"weekStart": "2026-07-06", "label": "Jul 6", "miles": 10.0, "runs": 4, "longRunMiles": 4.3}, {"weekStart": "2026-07-13", "label": "Jul 13", "miles": 13.1, "runs": 4, "longRunMiles": 5.2}, {"weekStart": "2026-07-20", "label": "Jul 20", "miles": 14.6, "runs": 4, "longRunMiles": 6.2}, {"weekStart": "2026-07-27", "label": "Jul 27", "miles": 15.0, "runs": 4, "longRunMiles": 6.2}, {"weekStart": "2026-08-03", "label": "Aug 3", "miles": 16.1, "runs": 4, "longRunMiles": 6.8}, {"weekStart": "2026-08-10", "label": "Aug 10", "miles": 14.3, "runs": 3, "longRunMiles": 7.0}, {"weekStart": "2026-08-17", "label": "Aug 17", "miles": 8.4, "runs": 2, "longRunMiles": 7.2}, {"weekStart": "2026-08-24", "label": "Aug 24", "miles": 5.5, "runs": 1, "longRunMiles": 0.0}], "longRuns": {"24075306060": {"label": "Aug 22 \u2014 Bellevue - Run (7.2mi)", "splits": [{"mile": 1, "pace": 12.84905389221557, "avgHr": 115.0, "maxHr": 135.0, "elevGainFt": 7}, {"mile": 2, "pace": 12.743515007145788, "avgHr": 159.0, "maxHr": 169.0, "elevGainFt": 115}, {"mile": 3, "pace": 12.834081898915086, "avgHr": 160.0, "maxHr": 174.0, "elevGainFt": 75}, {"mile": 4, "pace": 13.504083564194021, "avgHr": 158.0, "maxHr": 180.0, "elevGainFt": 59}, {"mile": 5, "pace": 13.616117175985188, "avgHr": 166.0, "maxHr": 179.0, "elevGainFt": 98}, {"mile": 6, "pace": 16.475257615668536, "avgHr": 159.0, "maxHr": 180.0, "elevGainFt": 141}, {"mile": 7, "pace": 14.234545717165435, "avgHr": 158.0, "maxHr": 175.0, "elevGainFt": 49}, {"mile": 8, "pace": 13.670367381609685, "avgHr": 165.0, "maxHr": 174.0, "elevGainFt": 10}, {"mile": 9, "pace": 13.758923474526425, "avgHr": 153.0, "maxHr": 175.0, "elevGainFt": 49}]}, "23985898248": {"label": "Aug 15 \u2014 New York Running (7.0mi)", "splits": [{"mile": 1, "pace": 11.50546192998372, "avgHr": 152.0, "maxHr": 167.0, "elevGainFt": 7}, {"mile": 2, "pace": 11.498678579790473, "avgHr": 165.0, "maxHr": 171.0, "elevGainFt": 30}, {"mile": 3, "pace": 12.043246599972662, "avgHr": 168.0, "maxHr": 174.0, "elevGainFt": 89}, {"mile": 4, "pace": 12.569864575540286, "avgHr": 166.0, "maxHr": 173.0, "elevGainFt": 10}, {"mile": 5, "pace": 14.62321967912312, "avgHr": 154.0, "maxHr": 173.0, "elevGainFt": 89}, {"mile": 6, "pace": 13.235282896094054, "avgHr": 154.0, "maxHr": 178.0, "elevGainFt": 30}, {"mile": 7, "pace": 13.643150576509628, "avgHr": 149.0, "maxHr": 163.0, "elevGainFt": 23}, {"mile": 8, "pace": 9.738078953004164, "avgHr": 165.0, "maxHr": 166.0, "elevGainFt": 0}]}, "23902614687": {"label": "Aug 8 \u2014 Richmond - Run (6.8mi)", "splits": [{"mile": 1, "pace": 42.10737833594977, "avgHr": 105.0, "maxHr": 117.0, "elevGainFt": 0}, {"mile": 2, "pace": 13.828967705021936, "avgHr": 146.0, "maxHr": 165.0, "elevGainFt": 39}, {"mile": 3, "pace": 12.053113291162838, "avgHr": 163.0, "maxHr": 172.0, "elevGainFt": 33}, {"mile": 4, "pace": 11.791112639964211, "avgHr": 165.0, "maxHr": 171.0, "elevGainFt": 20}, {"mile": 5, "pace": 12.002663165769821, "avgHr": 165.0, "maxHr": 172.0, "elevGainFt": 20}, {"mile": 6, "pace": 13.838067727639904, "avgHr": 157.0, "maxHr": 167.0, "elevGainFt": 43}, {"mile": 7, "pace": 12.673984923381303, "avgHr": 161.0, "maxHr": 173.0, "elevGainFt": 46}, {"mile": 8, "pace": 12.355333768377415, "avgHr": 164.0, "maxHr": 167.0, "elevGainFt": 0}, {"mile": 9, "pace": 12.470828018558334, "avgHr": 165.0, "maxHr": 171.0, "elevGainFt": 10}]}, "23815595965": {"label": "Aug 1 \u2014 Oakland - Run (6.2mi)", "splits": [{"mile": 1, "pace": 17.472927636936106, "avgHr": 123.0, "maxHr": 134.0, "elevGainFt": 0}, {"mile": 2, "pace": 11.660128981072988, "avgHr": 158.0, "maxHr": 173.0, "elevGainFt": 7}, {"mile": 3, "pace": 11.791295973753218, "avgHr": 171.0, "maxHr": 180.0, "elevGainFt": 7}, {"mile": 4, "pace": 12.468797657673333, "avgHr": 173.0, "maxHr": 180.0, "elevGainFt": 26}, {"mile": 5, "pace": 13.829184372227127, "avgHr": 173.0, "maxHr": 180.0, "elevGainFt": 33}, {"mile": 6, "pace": 16.115806722258817, "avgHr": 156.0, "maxHr": 179.0, "elevGainFt": 23}, {"mile": 7, "pace": 17.620186273960844, "avgHr": 137.0, "maxHr": 153.0, "elevGainFt": 20}, {"mile": 8, "pace": 20.974117033754727, "avgHr": 132.0, "maxHr": 140.0, "elevGainFt": 3}, {"mile": 9, "pace": 17.006788965517245, "avgHr": 129.0, "maxHr": 129.0, "elevGainFt": 3}]}, "23730310582": {"label": "Jul 25 \u2014 San Leandro - Run (6.2mi)", "splits": [{"mile": 1, "pace": 12.861376168784465, "avgHr": 129.0, "maxHr": 146.0, "elevGainFt": 0}, {"mile": 2, "pace": 12.59663130873526, "avgHr": 159.0, "maxHr": 168.0, "elevGainFt": 0}, {"mile": 3, "pace": 12.564997896777562, "avgHr": 168.0, "maxHr": 172.0, "elevGainFt": 30}, {"mile": 4, "pace": 13.473133487268075, "avgHr": 166.0, "maxHr": 177.0, "elevGainFt": 16}, {"mile": 5, "pace": 12.396647478345162, "avgHr": 169.0, "maxHr": 180.0, "elevGainFt": 7}, {"mile": 6, "pace": 14.951453828277433, "avgHr": 159.0, "maxHr": 180.0, "elevGainFt": 23}, {"mile": 7, "pace": 12.453133175885027, "avgHr": 165.0, "maxHr": 178.0, "elevGainFt": 7}, {"mile": 8, "pace": 25.49433917019475, "avgHr": 171.0, "maxHr": 174.0, "elevGainFt": 0}]}, "23656827894": {"label": "Jul 19 \u2014 Richmond - Run (5.2mi)", "splits": [{"mile": 1, "pace": 11.947173453101222, "avgHr": 117.0, "maxHr": 136.0, "elevGainFt": 0}, {"mile": 2, "pace": 11.986663126001964, "avgHr": 153.0, "maxHr": 162.0, "elevGainFt": 7}, {"mile": 3, "pace": 11.919412958852698, "avgHr": 161.0, "maxHr": 164.0, "elevGainFt": 10}, {"mile": 4, "pace": 12.113380107621762, "avgHr": 165.0, "maxHr": 175.0, "elevGainFt": 52}, {"mile": 5, "pace": 12.22859706065841, "avgHr": 168.0, "maxHr": 171.0, "elevGainFt": 33}, {"mile": 6, "pace": 11.977865695304919, "avgHr": 173.0, "maxHr": 180.0, "elevGainFt": 30}, {"mile": 7, "pace": 26.806762721745653, "avgHr": 164.0, "maxHr": 176.0, "elevGainFt": 7}, {"mile": 8, "pace": 12.562199663865547, "avgHr": 148.0, "maxHr": 148.0, "elevGainFt": 0}]}}, "vo2max": [{"date": "2026-04-28", "vo2": 43.1}, {"date": "2026-07-27", "vo2": 41.8}, {"date": "2026-08-12", "vo2": 42.7}], "vo2maxToday": null, "hrv": [{"date": "2026-07-24", "hrv": 57, "status": "BALANCED"}, {"date": "2026-07-27", "hrv": 46, "status": "BALANCED"}, {"date": "2026-07-30", "hrv": 48, "status": "BALANCED"}, {"date": "2026-08-02", "hrv": 43, "status": "BALANCED"}, {"date": "2026-08-05", "hrv": 50, "status": "BALANCED"}, {"date": "2026-08-08", "hrv": 48, "status": "BALANCED"}, {"date": "2026-08-11", "hrv": 52, "status": "BALANCED"}, {"date": "2026-08-14", "hrv": 52, "status": "BALANCED"}, {"date": "2026-08-20", "hrv": 49, "status": "NONE"}, {"date": "2026-08-23", "hrv": 31, "status": "UNBALANCED"}, {"date": "2026-08-26", "hrv": 41, "status": "BALANCED"}], "hrvToday": {"date": "2026-08-26", "hrv": 41, "status": "BALANCED"}, "trainingReadiness": {"score": 38, "level": "LOW", "recoveryPercent": 73, "loadFactorPercent": 98}, "trainingStatusFeedback": null, "bodyBattery": 50, "acwr": 0.94, "loadMix": {"easyMin": 519, "moderateMin": 66, "hardMin": 113, "easyPct": 74, "moderatePct": 9, "hardPct": 16}, "insights": [{"type": "watch", "icon": "VOLUME", "html": "Weekly mileage has grown from an average of <b>4.8 mi</b> earlier in this window to <b>11.1 mi</b> over the last month \u2014 a fast ramp \u2014 worth keeping an eye on injury risk."}, {"type": "watch", "icon": "TERRAIN", "html": "The Aug 22 Bellevue - Run run came in noticeably slower than usual: 13:51/mi against a typical 12:26/mi, with 604ft of gain over 7.2 mi (84 ft/mi vs a 31 ft/mi baseline). Mile 6 alone carried 141ft of that gain and slowed to 16:29/mi."}, {"type": "good", "icon": "LOAD MIX", "html": "Effort mix over the last 4 weeks \u2014 74% easy, 9% moderate, 16% hard \u2014 sits inside the typical 15\u201325% quality-volume range."}, {"type": "watch", "icon": "VO2 MAX", "html": "VO2 max has held flat at <b>43 ml/kg/min</b> across this window \u2014 normal early in a build, and usually the first metric to move once tempo/speed work lands."}, {"type": "watch", "icon": "HRV", "html": "HRV has moved from 57ms to <b>41ms</b> over this window, with 1 unbalanced reading(s) along the way \u2014 worth watching alongside sleep and training load."}, {"type": "good", "icon": "ACWR", "html": "Acute:chronic workload ratio is <b>0.94</b> \u2014 a sustainable range, meaning recent training load matches what your body's adapted to."}, {"type": "flag", "icon": "READINESS", "html": "Today's training readiness came in at <b>38/100 (Low)</b>, driven largely by today's recovery metrics. Worth prioritizing recovery before the next hard session."}], "racePredictions": {"5K": 1821, "10K": 3886, "Half Marathon": 8909, "Marathon": 20025}, "enduranceScore": null, "hillScore": null, "restingHr": {"today": 54.0, "baseline": 53.9}, "sleepHours": 5.0, "avgStress": 26};</script>
+<script>
+function paceStr(min){ if(min==null) return '—'; const m=Math.floor(min), s=Math.round((min-m)*60); return `${m}:${s.toString().padStart(2,'0')}`; }
+function durStr(min){ const t=Math.round(min*60), h=Math.floor(t/3600), m=Math.floor((t%3600)/60), s=t%60; return h>0?`${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`:`${m}:${s.toString().padStart(2,'0')}`; }
+function fmtDate(d){ return new Date(d+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
+const TYPE_COLORS = {'Long Run':'#6690c4','Easy Run':'#8b95a1','Tempo':'#e3a857','Speed':'#c1614a','Benchmark':'#5fa8a0','Strides':'#5c6570'};
+function safe(name, fn){ try{ fn(); } catch(e){ console.error('Section failed:', name, e); const el=document.getElementById('boot-errors'); if(el){ el.style.display='block'; el.innerHTML += `<div>Section "${name}" failed: ${e.message}</div>`; } } }
+const SVGNS='http://www.w3.org/2000/svg';
+function el(tag, attrs){ const e=document.createElementNS(SVGNS,tag); for(const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+function niceTicks(min,max,count){ if(min===max){min-=1;max+=1;} const range=max-min, rough=range/count, mag=Math.pow(10,Math.floor(Math.log10(rough))), norm=rough/mag; let step; if(norm<1.5) step=mag; else if(norm<3) step=2*mag; else if(norm<7) step=5*mag; else step=10*mag; const niceMin=Math.floor(min/step)*step, niceMax=Math.ceil(max/step)*step; const ticks=[]; for(let v=niceMin;v<=niceMax+step*0.001;v+=step) ticks.push(Math.round(v*1000)/1000); return ticks; }
+const tooltip = document.getElementById('chart-tooltip');
+function showTooltip(evt, html){ tooltip.innerHTML=html; tooltip.style.display='block'; positionTooltip(evt); }
+function positionTooltip(evt){ const pad=14; let x=evt.clientX+pad, y=evt.clientY+pad; const tw=tooltip.offsetWidth||180, th=tooltip.offsetHeight||60; if(x+tw>window.innerWidth-10) x=evt.clientX-tw-pad; if(y+th>window.innerHeight-10) y=evt.clientY-th-pad; tooltip.style.left=x+'px'; tooltip.style.top=y+'px'; }
+function hideTooltip(){ tooltip.style.display='none'; }
+
+function renderVolumeChart(containerId, weekly){
+  const container=document.getElementById(containerId); container.innerHTML='';
+  if(!weekly.length){ container.innerHTML="<p class='empty'>No weekly data yet.</p>"; return; }
+  const W=720,H=300,M={top:26,right:40,bottom:34,left:42};
+  const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
+  const maxMiles=Math.max(...weekly.map(w=>w.miles),1);
+  const yTicks=niceTicks(0,maxMiles,5), yMax=yTicks[yTicks.length-1];
+  const yScale=v=>M.top+plotH-(v/yMax)*plotH;
+  const runsMax=Math.max(6,...weekly.map(w=>w.runs));
+  const y1Scale=v=>M.top+plotH-(v/runsMax)*plotH;
+  const n=weekly.length, bandW=plotW/n, xCenter=i=>M.left+bandW*i+bandW/2;
+  yTicks.forEach(t=>{ svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:yScale(t),y2:yScale(t)})); const lbl=el('text',{x:M.left-8,y:yScale(t)+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
+  const yTitle=el('text',{x:10,y:12}); yTitle.textContent='miles'; svg.appendChild(yTitle);
+  const y1Title=el('text',{x:W-M.right,y:12,'text-anchor':'end'}); y1Title.textContent='runs/wk'; svg.appendChild(y1Title);
+  const milesBarW=bandW*0.44, lrBarW=bandW*0.24;
+  weekly.forEach((w,i)=>{
+    const cx=xCenter(i), mBarX=cx-milesBarW-2, mBarY=yScale(w.miles);
+    const mBar=el('rect',{class:'data-point',x:mBarX,y:mBarY,width:milesBarW,height:(M.top+plotH)-mBarY,fill:'#e3a857',rx:2});
+    mBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Miles: <b>${w.miles.toFixed(1)}</b></div><div class="tt-row">Runs: <b>${w.runs}</b></div>${w.longRunMiles?`<div class="tt-row">Long run: <b>${w.longRunMiles.toFixed(1)}mi</b></div>`:''}`));
+    mBar.addEventListener('mousemove',positionTooltip); mBar.addEventListener('mouseleave',hideTooltip);
+    svg.appendChild(mBar);
+    if(w.longRunMiles){
+      const lrBarX=cx+2, lrBarY=yScale(w.longRunMiles);
+      const lrBar=el('rect',{class:'data-point',x:lrBarX,y:lrBarY,width:lrBarW,height:(M.top+plotH)-lrBarY,fill:'#6690c4',rx:2});
+      lrBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Long run: <b>${w.longRunMiles.toFixed(1)}mi</b></div>`));
+      lrBar.addEventListener('mousemove',positionTooltip); lrBar.addEventListener('mouseleave',hideTooltip);
+      svg.appendChild(lrBar);
+    }
+    if(n<=10 || i%2===0){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.label; svg.appendChild(xl); }
+  });
+  let linePath=''; weekly.forEach((w,i)=>{ const x=xCenter(i), y=y1Scale(w.runs); linePath+=(i===0?'M':'L')+x+','+y+' '; });
+  svg.appendChild(el('path',{d:linePath.trim(),fill:'none',stroke:'#5fa8a0','stroke-width':2}));
+  weekly.forEach((w,i)=>{ const c=el('circle',{class:'data-point',cx:xCenter(i),cy:y1Scale(w.runs),r:3.5,fill:'#5fa8a0'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Runs: <b>${w.runs}</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
+  container.appendChild(svg);
+}
+
+function renderPaceChart(containerId, runsAsc){
+  const container=document.getElementById(containerId); container.innerHTML='';
+  const runs=runsAsc.filter(r=>r.paceMinMi);
+  if(runs.length<2){ container.innerHTML="<p class='empty'>Not enough paced runs yet.</p>"; return; }
+  const W=720,H=300,M={top:26,right:20,bottom:34,left:50};
+  const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
+  const rolling=runs.map((r,i)=>{ const w=runs.slice(Math.max(0,i-4),i+1); return w.reduce((s,x)=>s+x.paceMinMi,0)/w.length; });
+  const paces=runs.map(r=>r.paceMinMi);
+  const minP=Math.min(...paces)-0.6, maxP=Math.max(...paces)+0.6;
+  const yTicks=niceTicks(minP,maxP,5);
+  const yScale=v=>M.top+((v-yTicks[0])/(yTicks[yTicks.length-1]-yTicks[0]))*plotH;
+  const n=runs.length, xScale=i=>n<=1?M.left+plotW/2:M.left+(i/(n-1))*plotW;
+  yTicks.forEach(t=>{ const y=yScale(t); svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-8,y:y+3,'text-anchor':'end'}); lbl.textContent=paceStr(t); svg.appendChild(lbl); });
+  const yTitle=el('text',{x:6,y:12}); yTitle.textContent='min/mile'; svg.appendChild(yTitle);
+  const labelEvery=Math.ceil(n/13);
+  runs.forEach((r,i)=>{ if(i%labelEvery===0||i===n-1){ const xl=el('text',{x:xScale(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=r.dateLabel; svg.appendChild(xl); } });
+  let path=''; runs.forEach((r,i)=>{ path+=(i===0?'M':'L')+xScale(i)+','+yScale(rolling[i])+' '; });
+  svg.appendChild(el('path',{d:path.trim(),fill:'none',stroke:'#e7e9ec','stroke-width':1.5,'stroke-dasharray':'4,3'}));
+  runs.forEach((r,i)=>{ const c=el('circle',{class:'data-point',cx:xScale(i),cy:yScale(r.paceMinMi),r:5,fill:TYPE_COLORS[r.type]||'#8b95a1'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${r.name}</div><div class="tt-row">${fmtDate(r.date)} · ${r.type}</div><div class="tt-row">Pace: <b>${paceStr(r.paceMinMi)}/mi</b></div><div class="tt-row">Dist: <b>${r.distMi.toFixed(1)}mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
+  container.appendChild(svg);
+}
+
+function renderSeriesChart(containerId, series, valueKey, color){
+  const container=document.getElementById(containerId); container.innerHTML='';
+  const pts=series.filter(p=>typeof p[valueKey]==='number');
+  if(pts.length<2){ container.innerHTML="<p class='empty'>Not enough data yet.</p>"; return; }
+  const W=420,H=190,M={top:12,right:12,bottom:26,left:32};
+  const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
+  const vals=pts.map(p=>p[valueKey]);
+  const yTicks=niceTicks(Math.min(...vals)-1,Math.max(...vals)+1,4);
+  const yMin=yTicks[0], yMax=yTicks[yTicks.length-1];
+  const yScale=v=>M.top+plotH-((v-yMin)/(yMax-yMin))*plotH;
+  const n=pts.length, xScale=i=>n<=1?M.left+plotW/2:M.left+(i/(n-1))*plotW;
+  yTicks.forEach(t=>{ const y=yScale(t); svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-6,y:y+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
+  const labelEvery=Math.ceil(n/5);
+  pts.forEach((p,i)=>{ if(i%labelEvery===0||i===n-1){ const xl=el('text',{x:xScale(i),y:H-M.bottom+14,'text-anchor':'middle'}); xl.textContent=fmtDate(p.date); svg.appendChild(xl); } });
+  let linePath='', areaPath='';
+  pts.forEach((p,i)=>{ const x=xScale(i), y=yScale(p[valueKey]); linePath+=(i===0?'M':'L')+x+','+y+' '; areaPath+=(i===0?'M':'L')+x+','+y+' '; });
+  areaPath+=`L${xScale(n-1)},${M.top+plotH} L${xScale(0)},${M.top+plotH} Z`;
+  svg.appendChild(el('path',{d:areaPath,fill:color+'22',stroke:'none'}));
+  svg.appendChild(el('path',{d:linePath.trim(),fill:'none',stroke:color,'stroke-width':2}));
+  pts.forEach((p,i)=>{ const c=el('circle',{class:'data-point',cx:xScale(i),cy:yScale(p[valueKey]),r:3,fill:color,opacity:0.9}); const extra = p.status? `<div class="tt-row">${p.status}</div>` : ''; c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${fmtDate(p.date)}</div><div class="tt-row">${p[valueKey]}</div>${extra}`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
+  container.appendChild(svg);
+}
+
+function renderSplitsChart(containerId, splits){
+  const container=document.getElementById(containerId); container.innerHTML='';
+  if(!splits.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; return; }
+  const W=720,H=320,M={top:30,right:46,bottom:34,left:50};
+  const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
+  const n=splits.length, bandW=plotW/n, xCenter=i=>M.left+bandW*i+bandW/2;
+  const paces=splits.map(s=>s.pace).filter(p=>p>0);
+  const paceMin=Math.min(...paces)-0.4, paceMax=Math.max(...paces)+0.4;
+  const paceTop=M.top, paceBottom=M.top+plotH;
+  const yPace=v=>paceTop+((v-paceMin)/(paceMax-paceMin))*(paceBottom-paceTop);
+  const hrs=splits.map(s=>s.avgHr).filter(h=>h);
+  const hrTicks = hrs.length ? niceTicks(Math.min(...hrs)-5,Math.max(...hrs)+5,4) : [0,1];
+  const hrMin=hrTicks[0], hrMax=hrTicks[hrTicks.length-1];
+  const yHr=v=>M.top+plotH-((v-hrMin)/(hrMax-hrMin))*plotH;
+  const maxElev=Math.max(...splits.map(s=>s.elevGainFt||0),1);
+  const elevCapPx=plotH*0.32, yElev=v=>(v/maxElev)*elevCapPx;
+  const paceTicks=niceTicks(paceMin,paceMax,5);
+  paceTicks.forEach(t=>{ const y=yPace(t); if(y<M.top-1||y>M.top+plotH+1) return; svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-8,y:y+3,'text-anchor':'end'}); lbl.textContent=paceStr(t); svg.appendChild(lbl); });
+  const yTitle=el('text',{x:6,y:M.top-14}); yTitle.textContent='min/mi'; svg.appendChild(yTitle);
+  const y1Title=el('text',{x:W-M.right,y:M.top-14,'text-anchor':'end'}); y1Title.textContent='bpm'; svg.appendChild(y1Title);
+  splits.forEach((s,i)=>{
+    const cx=xCenter(i), barW=bandW*0.55, h=yElev(s.elevGainFt||0);
+    const bar=el('rect',{class:'data-point',x:cx-barW/2,y:(M.top+plotH)-h,width:barW,height:h,fill:'#22262d'});
+    bar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Mile ${s.mile}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`));
+    bar.addEventListener('mousemove',positionTooltip); bar.addEventListener('mouseleave',hideTooltip);
+    svg.appendChild(bar);
+    const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent='Mi '+s.mile; svg.appendChild(xl);
+  });
+  let pacePath=''; splits.forEach((s,i)=>{ pacePath+=(i===0?'M':'L')+xCenter(i)+','+yPace(s.pace)+' '; });
+  svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2.5}));
+  splits.forEach((s,i)=>{ const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yPace(s.pace),r:4.5,fill:'#e3a857'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Mile ${s.mile}</div><div class="tt-row">Pace: <b>${paceStr(s.pace)}/mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  if(hrs.length){
+    let hrPath=''; splits.forEach((s,i)=>{ hrPath+=(i===0?'M':'L')+xCenter(i)+','+yHr(s.avgHr||hrMin)+' '; });
+    svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#c1614a','stroke-width':2.5}));
+    splits.forEach((s,i)=>{ if(!s.avgHr) return; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yHr(s.avgHr),r:4.5,fill:'#c1614a'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Mile ${s.mile}</div><div class="tt-row">Avg HR: <b>${s.avgHr} bpm</b></div>${s.maxHr?`<div class="tt-row">Max HR: <b>${s.maxHr} bpm</b></div>`:''}`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  }
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
+  const legendItems=[{c:'#e3a857',t:'Pace'},{c:'#c1614a',t:'Avg HR'},{c:'#22262d',t:'Elevation gain'}];
+  let lx=M.left;
+  legendItems.forEach(item=>{ svg.appendChild(el('rect',{x:lx,y:4,width:9,height:9,rx:2,fill:item.c})); const t=el('text',{x:lx+13,y:12}); t.textContent=item.t; svg.appendChild(t); lx+=13+item.t.length*5.6+14; });
+  container.appendChild(svg);
+}
+
+safe('header', function(){
+  const m = DATA.meta;
+  document.getElementById('hero-title').textContent = `Build → ${m.raceName}`;
+  document.getElementById('sync-text').textContent = `Synced from Garmin — through ${fmtDate(m.lastSynced)}`;
+  document.getElementById('footer-sync-date').textContent = fmtDate(m.lastSynced);
+  const cells = [
+    { label:'Race Day', value: fmtDate(m.raceDate), sub: m.raceName },
+    { label:'Time to Race', value: m.daysLeft>=0?`${m.daysLeft}d`:'—', sub: m.daysLeft>=0?`${m.weeksLeft} weeks`:'race complete', accent:true },
+    { label:'Phase', value: m.phase, sub: '' },
+  ];
+  document.getElementById('countdown-strip').innerHTML = cells.map(c=>`
+    <div class="countdown-cell"><span class="cc-label">${c.label}</span><span class="cc-value ${c.accent?'accent':''}">${c.value}</span><span class="cc-sub">${c.sub}</span></div>
+  `).join('');
+});
+
+safe('hero stats', function(){
+  const runs = DATA.runs;
+  const last28 = runs.filter(r => (new Date(DATA.meta.lastSynced)-new Date(r.date))/86400000 <= 28);
+  const prev28 = runs.filter(r => { const d=(new Date(DATA.meta.lastSynced)-new Date(r.date))/86400000; return d>28 && d<=56; });
+  const totalMi = runs.reduce((s,r)=>s+r.distMi,0);
+  const last28Mi = last28.reduce((s,r)=>s+r.distMi,0);
+  const prev28Mi = prev28.reduce((s,r)=>s+r.distMi,0);
+  const mileageDelta = prev28Mi>0 ? Math.round(((last28Mi-prev28Mi)/prev28Mi)*100) : null;
+  const longest = runs.length ? runs.reduce((max,r)=>r.distMi>max.distMi?r:max, runs[0]) : null;
+  const vo2Pts = DATA.vo2max;
+  const vo2 = DATA.vo2maxToday;
+  const vo2First = vo2Pts.length ? vo2Pts[0].vo2 : null;
+  const r = DATA.trainingReadiness;
+  const stats = [
+    { label:'Total Distance', value: totalMi.toFixed(1), unit:'mi', delta: `${runs.length} runs · this window` },
+    { label:'Last 28 Days', value: last28Mi.toFixed(1), unit:'mi', delta: mileageDelta==null?`${last28.length} runs`:`${mileageDelta>0?'+':''}${mileageDelta}% vs prior 28d`, deltaClass: mileageDelta>0?'up':(mileageDelta<0?'warn':'') },
+    { label:'Longest Run', value: longest?longest.distMi.toFixed(1):'—', unit:'mi', delta: longest?`${fmtDate(longest.date)} · ${paceStr(longest.paceMinMi)}/mi`:'' },
+    { label:'VO2 Max', value: vo2!=null?vo2.toFixed(0):'—', unit:'ml/kg/min', delta: (vo2!=null&&vo2First!=null)?(vo2>vo2First?`up from ${vo2First.toFixed(0)}`:(vo2<vo2First?`down from ${vo2First.toFixed(0)}`:'holding steady')):'', deltaClass:(vo2!=null&&vo2First!=null)?(vo2>vo2First?'up':(vo2<vo2First?'warn':'')):'' },
+    { label:'Readiness Today', value: r&&r.score!=null?r.score:'—', unit:'/100', delta: r&&r.level?String(r.level).replace(/_/g,' ').toLowerCase():'—', deltaClass: r&&r.score!=null?(r.score>=70?'up':(r.score<50?'warn':'')):'' },
+  ];
+  document.getElementById('hero-stats').innerHTML = stats.map(s=>`
+    <div class="stat-cell"><div class="stat-label">${s.label}</div><div class="stat-value">${s.value}<span class="stat-unit">${s.unit}</span></div><div class="stat-delta ${s.deltaClass||''}">${s.delta}</div></div>
+  `).join('');
+});
+
+safe('recommendation panel', function(){
+  const rec = DATA.recommendation;
+  const notesHtml = rec.notes.map(n=>`<li>${n}</li>`).join('');
+  document.getElementById('rec-panel').className = `panel rec-panel tone-${rec.tone}`;
+  document.getElementById('rec-panel').innerHTML = `
+    <div class="rec-head"><span class="rec-eyebrow">Today's Call</span></div>
+    <div class="rec-headline">${rec.headline}</div>
+    <ul class="rec-notes">${notesHtml}</ul>
+    <div class="rec-disclaimer">Generated from your Garmin metrics — not a substitute for how you actually feel or a coach's judgment.</div>
+  `;
+});
+
+safe('weekly volume chart', function(){ renderVolumeChart('chart-volume', DATA.weekly); });
+
+safe('pace progression chart', function(){
+  const runsAsc = [...DATA.runs].sort((a,b)=> new Date(a.date)-new Date(b.date));
+  renderPaceChart('chart-pace', runsAsc);
+  const types = [...new Set(DATA.runs.map(r=>r.type))];
+  document.getElementById('pace-legend').innerHTML = types.map(t=>`<div class="legend-item"><span class="legend-swatch" style="background:${TYPE_COLORS[t]}"></span>${t}</div>`).join('') + `<div class="legend-item"><span class="legend-swatch" style="background:#e7e9ec"></span>5-run rolling avg</div>`;
+});
+
+safe('insights', function(){
+  document.getElementById('insights').innerHTML = DATA.insights.map(i=>`
+    <div class="insight-card"><span class="insight-icon ${i.type}">${i.icon}</span><div class="insight-text">${i.html}</div></div>
+  `).join('');
+});
+
+safe('recovery panel', function(){
+  const r = DATA.trainingReadiness;
+  document.getElementById('readiness-score').textContent = r&&r.score!=null ? r.score : '—';
+  const level = r&&r.level ? String(r.level) : null;
+  const levelClass = level==='HIGH' ? 'high' : (level==='MODERATE' ? 'moderate' : (level ? 'low-warn' : ''));
+  document.getElementById('readiness-badge').outerHTML = `<span class="badge ${levelClass}" id="readiness-badge">${level ? level.replace(/_/g,' ') : '—'}</span>`;
+  document.getElementById('training-status-badge').textContent = DATA.trainingStatusFeedback || '—';
+  document.getElementById('training-acwr').textContent = DATA.acwr!=null ? `ACWR ${DATA.acwr.toFixed(2)}` : '';
+  renderSeriesChart('chart-hrv', DATA.hrv, 'hrv', '#5fa8a0');
+  const mix = DATA.loadMix;
+  if(mix){
+    const rows = [
+      { name:'Easy', pct:mix.easyPct, min:mix.easyMin, color:'#8b95a1', targetMin:65, targetMax:85 },
+      { name:'Moderate', pct:mix.moderatePct, min:mix.moderateMin, color:'#e3a857', targetMin:5, targetMax:20 },
+      { name:'Hard', pct:mix.hardPct, min:mix.hardMin, color:'#c1614a', targetMin:5, targetMax:15 },
+    ];
+    document.getElementById('balance-bars').innerHTML = rows.map(r=>`
+      <div class="balance-row">
+        <div class="balance-name">${r.name}</div>
+        <div class="balance-track">
+          <div class="balance-target" style="left:${r.targetMin}%; width:${r.targetMax-r.targetMin}%;"></div>
+          <div class="balance-fill" style="width:${Math.min(100,r.pct)}%; background:${r.color};"></div>
+        </div>
+        <div class="balance-val">${r.pct}%</div>
+      </div>`).join('') + `<div class="dial-label" style="margin-top:2px;">dashed = general 80/20-style target range · ${mix.easyMin+mix.moderateMin+mix.hardMin} min over last 4 weeks</div>`;
+  } else {
+    document.getElementById('balance-bars').innerHTML = "<p class='empty'>Not enough recent runs to compute an effort mix.</p>";
+  }
+});
+
+safe('fitness trend', function(){
+  const rp = DATA.racePredictions;
+  function row(label, sec, hi){ return `<div class="predict-row ${hi?'highlight':''}"><span class="predict-label">${label}</span><span>${sec!=null?durStr(sec/60):'—'}</span></div>`; }
+  document.getElementById('predict-list').innerHTML = rp
+    ? row('5K', rp['5K']) + row('10K', rp['10K']) + row('Half Marathon', rp['Half Marathon'], true) + row('Marathon', rp['Marathon'])
+    : "<p class='empty'>Race predictions aren't available from Garmin right now.</p>";
+  document.getElementById('score-row').innerHTML = `
+    <div class="score-item"><b>${DATA.enduranceScore!=null?DATA.enduranceScore:'—'}</b><span>Endurance Score</span></div>
+    <div class="score-item"><b>${DATA.hillScore!=null?DATA.hillScore:'—'}</b><span>Hill Score</span></div>
+  `;
+  renderSeriesChart('chart-vo2', DATA.vo2max, 'vo2', '#e3a857');
+});
+
+safe('long run splits', function(){
+  const longRuns = DATA.longRuns;
+  const ids = Object.keys(longRuns);
+  if(!ids.length){ document.getElementById('splits-panel').innerHTML = "<p class='empty'>No long runs with lap data in this window yet.</p>"; return; }
+  function renderSplit(id){
+    const lr = longRuns[id];
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.id===id));
+    const paced = lr.splits.filter(s=>s.pace>0);
+    const avgPace = paced.length ? paced.reduce((s,x)=>s+x.pace,0)/paced.length : null;
+    const hrs = lr.splits.filter(s=>s.avgHr).map(s=>s.avgHr);
+    const avgHr = hrs.length ? Math.round(hrs.reduce((s,x)=>s+x,0)/hrs.length) : null;
+    const totalGain = lr.splits.reduce((s,x)=>s+(x.elevGainFt||0),0);
+    const fastest = paced.length ? paced.reduce((min,x)=>x.pace<min.pace?x:min, paced[0]) : null;
+    const slowest = paced.length ? paced.reduce((max,x)=>x.pace>max.pace?x:max, paced[0]) : null;
+    document.getElementById('split-meta').innerHTML = `
+      <div class="split-meta-item"><div class="stat-label">Avg Pace</div><div class="val">${avgPace?paceStr(avgPace)+'/mi':'—'}</div></div>
+      <div class="split-meta-item"><div class="stat-label">Avg HR</div><div class="val">${avgHr??'—'} bpm</div></div>
+      <div class="split-meta-item"><div class="stat-label">Elev Gain</div><div class="val">${totalGain} ft</div></div>
+      <div class="split-meta-item"><div class="stat-label">Fastest / Slowest Mile</div><div class="val">${fastest?paceStr(fastest.pace):'—'} → ${slowest?paceStr(slowest.pace):'—'}</div></div>
+    `;
+    renderSplitsChart('chart-splits', lr.splits);
+  }
+  document.getElementById('split-tabs').innerHTML = ids.map(id=>`<button class="tab-btn" data-id="${id}">${longRuns[id].label}</button>`).join('');
+  document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>renderSplit(b.dataset.id)));
+  renderSplit(ids[0]);
+});
+
+safe('run table', function(){
+  let sortKey='date', sortDir=-1, filterType='', filterSearch='';
+  const types = [...new Set(DATA.runs.map(r=>r.type))];
+  document.getElementById('filter-type').innerHTML += types.map(t=>`<option value="${t}">${t}</option>`).join('');
+  function render(){
+    let rows = DATA.runs.filter(r => (!filterType||r.type===filterType) && (!filterSearch||r.name.toLowerCase().includes(filterSearch.toLowerCase())));
+    rows.sort((a,b)=>{ const av=a[sortKey], bv=b[sortKey]; if(typeof av==='string') return av.localeCompare(bv)*sortDir; return ((av??0)-(bv??0))*sortDir; });
+    document.getElementById('table-count').textContent = `${rows.length} of ${DATA.runs.length} runs`;
+    document.getElementById('run-table-body').innerHTML = rows.map(r=>`
+      <tr>
+        <td>${fmtDate(r.date)}</td>
+        <td class="name-cell">${r.name}</td>
+        <td><span class="type-pill ${r.type.replace(/\s/g,'-')}">${r.type}</span></td>
+        <td>${r.distMi.toFixed(2)} mi</td>
+        <td>${durStr(r.durMin)}</td>
+        <td>${paceStr(r.paceMinMi)}/mi</td>
+        <td>${r.avgHr??'—'}</td>
+        <td>${r.maxHr??'—'}</td>
+        <td>+${r.elevGainFt??0}ft</td>
+      </tr>`).join('');
+    document.querySelectorAll('thead th').forEach(th=>th.classList.toggle('sorted', th.dataset.key===sortKey));
+  }
+  document.querySelectorAll('thead th').forEach(th=>{ th.addEventListener('click',()=>{ const key=th.dataset.key; if(sortKey===key){sortDir*=-1;} else {sortKey=key; sortDir = key==='date'?-1:1;} render(); }); });
+  document.getElementById('filter-type').addEventListener('change', e=>{ filterType=e.target.value; render(); });
+  document.getElementById('filter-search').addEventListener('input', e=>{ filterSearch=e.target.value; render(); });
+  document.getElementById('table-note').textContent = `All ${DATA.runs.length} runs, past ${Math.round((new Date(DATA.meta.syncRangeEnd)-new Date(DATA.meta.syncRangeStart))/86400000/30)} months. Click a column to sort.`;
+  render();
+});
+</script>
 </body>
 </html>

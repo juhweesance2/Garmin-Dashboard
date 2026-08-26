@@ -34,6 +34,25 @@ h2 { font-family:var(--font-display); font-weight:600; font-size:0.78rem; text-t
 section { margin-bottom:34px; }
 .empty { color:var(--ink-muted); font-size:0.85rem; }
 
+.race-card { background:var(--paper-raised); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:10px; padding:16px 16px 14px; }
+.race-card.tone-good { border-left-color:var(--good); }
+.race-card.tone-caution { border-left-color:var(--warning); }
+.race-card.tone-neutral { border-left-color:var(--accent); }
+.race-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; flex-wrap:wrap; gap:6px; }
+.race-title { font-family:var(--font-display); font-weight:600; font-size:0.95rem; }
+.race-phase { display:inline-block; font-size:0.62rem; text-transform:uppercase; letter-spacing:0.05em; padding:2px 7px; border-radius:10px; background:var(--line); color:var(--ink-muted); margin-left:8px; }
+.race-days { font-family:var(--font-mono); font-size:0.8rem; color:var(--ink-muted); }
+.rec-headline { font-size:1rem; font-weight:600; margin-bottom:8px; }
+.tone-good .rec-headline { color:var(--good); }
+.tone-caution .rec-headline { color:var(--warning); }
+.tone-neutral .rec-headline { color:var(--ink); }
+.rec-notes { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.rec-notes li { font-size:0.85rem; color:var(--ink-muted); line-height:1.4; padding-left:14px; position:relative; }
+.rec-notes li::before { content:""; position:absolute; left:0; top:0.5em; width:5px; height:5px; border-radius:50%; background:var(--accent); }
+.tone-good .rec-notes li::before { background:var(--good); }
+.tone-caution .rec-notes li::before { background:var(--warning); }
+.rec-disclaimer { font-size:0.68rem; color:var(--ink-muted); margin-top:10px; font-style:italic; }
+
 .stat-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
 .stat-tile { background:var(--paper-raised); border:1px solid var(--line); border-radius:10px; padding:14px 14px 12px; }
 .stat-value { font-family:var(--font-mono); font-size:1.7rem; font-weight:500; font-variant-numeric:tabular-nums; line-height:1.1; }
@@ -43,6 +62,8 @@ section { margin-bottom:34px; }
 .stat-tile.rhr-tile .rhr-row { display:flex; align-items:flex-end; justify-content:space-between; gap:8px; }
 .rhr-line { fill:none; stroke:var(--good); stroke-width:1.6; }
 .rhr-dot { fill:var(--good); }
+.vo2-line { fill:none; stroke:var(--accent); stroke-width:1.6; }
+.vo2-dot { fill:var(--accent); }
 
 .pill { display:inline-flex; align-items:center; gap:5px; font-size:0.68rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; padding:3px 8px; border-radius:20px; margin-top:6px; color:var(--good); background:color-mix(in srgb, var(--good) 14%, transparent); }
 .pill::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
@@ -69,9 +90,15 @@ section { margin-bottom:34px; }
 .pace-label { font-family:var(--font-mono); font-size:9px; fill:var(--ink-muted); }
 .chart-caption { font-family:var(--font-mono); font-size:0.64rem; color:var(--ink-muted); margin-top:6px; }
 
-.load-row { display:flex; gap:18px; margin-top:14px; font-family:var(--font-mono); font-size:0.78rem; flex-wrap:wrap; }
-.load-item b { font-size:0.95rem; }
-.load-item span { display:block; color:var(--ink-muted); font-family:var(--font-body); font-size:0.65rem; text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }
+.predict-list { display:flex; flex-direction:column; gap:2px; margin-bottom:16px; }
+.predict-row { display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-bottom:1px solid var(--line); font-family:var(--font-mono); font-size:0.85rem; }
+.predict-row.highlight { background:color-mix(in srgb, var(--accent) 8%, transparent); border-radius:6px; font-weight:600; border-bottom-color:transparent; }
+.predict-label { color:var(--ink-muted); font-family:var(--font-body); text-transform:uppercase; font-size:0.7rem; letter-spacing:0.05em; }
+.predict-row.highlight .predict-label { color:var(--accent); }
+.predict-time { font-variant-numeric:tabular-nums; }
+.score-row { display:flex; gap:22px; }
+.score-item b { font-family:var(--font-mono); font-size:1.2rem; font-variant-numeric:tabular-nums; }
+.score-item span { display:block; font-family:var(--font-body); font-size:0.65rem; color:var(--ink-muted); text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }
 
 .ladder { display:flex; height:30px; border-radius:6px; overflow:hidden; gap:2px; margin-bottom:14px; }
 .seg { flex:0 0 var(--w); }
@@ -104,8 +131,20 @@ footer { text-align:center; font-size:0.68rem; color:var(--ink-muted); margin-to
 <div class="wrap">
 <header class="top">
   <h1>Training Dashboard</h1>
-  <div class="updated">Updated<br>2026-08-26 13:59 UTC</div>
+  <div class="updated">Updated<br>2026-08-26 14:04 UTC</div>
 </header>
+
+<section>
+  <div class="race-card tone-caution">
+    <div class="race-head">
+      <div class="race-title">Half Marathon · November 8, 2026<span class="race-phase">Base</span></div>
+      <div class="race-days">10w 4d to go</div>
+    </div>
+    <div class="rec-headline">Lean toward an easy day or rest</div>
+    <ul class="rec-notes"><li>Training readiness: Low (38/100).</li><li>HRV status: Balanced.</li><li>Training load ratio: 0.94 — a sustainable range.</li><li>Only 5.0h of sleep last night.</li></ul>
+    <div class="rec-disclaimer">Generated from your Garmin metrics — not a substitute for how you actually feel or a coach's judgment.</div>
+  </div>
+</section>
 
 <section>
   <h2>Today's Snapshot</h2>
@@ -128,17 +167,42 @@ footer { text-align:center; font-size:0.68rem; color:var(--ink-muted); margin-to
       <div class="stat-value">26</div>
       <div class="stat-label">Avg Stress</div>
     </div>
+    <div class="stat-tile rhr-tile">
+      <div class="rhr-row">
+        <div>
+          <div class="stat-value">—</div>
+          <div class="stat-label">VO2 Max</div>
+          
+        </div>
+        
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Recovery</h2>
+  <div class="stat-grid">
     <div class="stat-tile">
-      <div class="stat-value">—</div>
-      <div class="stat-label">VO2 Max</div>
-      
+      <div class="stat-value">38</div>
+      <div class="stat-label">Training Readiness</div>
+      <div class="stat-sub">Low</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-value">41</div>
+      <div class="stat-label">HRV (ms)</div>
+      <div class="stat-sub">Balanced</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-value">50</div>
+      <div class="stat-label">Body Battery</div>
     </div>
   </div>
 </section>
 
 <section>
   <h2>Insights</h2>
-  <ul class="insights"><li>Last week's mileage (8.4 mi) is 44% down vs the trailing 4-week average (15.0 mi).</li><li>Your last 4 weeks have averaged 24 sec/mi slower than the 4 weeks before that.</li><li>Longest run in this period: 7.18 mi (Bellevue - Run, Aug 22).</li><li>You ran in 12 of the last 12 weeks.</li><li>Total distance: 191.2 mi across 63 runs over this period.</li></ul>
+  <ul class="insights"><li>Last week's mileage (8.4 mi) is 44% down vs the trailing 4-week average (15.0 mi).</li><li>Your last 4 weeks have averaged 24 sec/mi slower than the 4 weeks before that.</li><li>Longest run in this period: 7.18 mi (Bellevue - Run, Aug 22).</li><li>You ran in 12 of the last 12 weeks.</li><li>Total distance: 191.2 mi across 63 runs over this period.</li><li>This week's intensity minutes: 30 moderate + 47 vigorous (general guideline: 150 moderate or 75 vigorous per week).</li></ul>
 </section>
 
 <section>
@@ -150,6 +214,15 @@ footer { text-align:center; font-size:0.68rem; color:var(--ink-muted); margin-to
     </div>
   </div>
   <div class="chart-caption">Bars: weekly mileage · Line: weekly average pace (higher = faster)</div>
+</section>
+
+<section>
+  <h2>Fitness Trend</h2>
+  <div class="predict-list"><div class="predict-row"><span class="predict-label">5K</span><span class="predict-time">30:21</span></div><div class="predict-row"><span class="predict-label">10K</span><span class="predict-time">1:04:46</span></div><div class="predict-row highlight"><span class="predict-label">Half Marathon</span><span class="predict-time">2:28:29</span></div><div class="predict-row"><span class="predict-label">Marathon</span><span class="predict-time">5:33:45</span></div></div>
+  <div class="score-row">
+    <div class="score-item"><b>—</b><span>Endurance Score</span></div>
+    <div class="score-item"><b>—</b><span>Hill Score</span></div>
+  </div>
 </section>
 
 <section>

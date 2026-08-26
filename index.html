@@ -6,6 +6,8 @@
 <title>Training Console — Half Marathon</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <style>
 :root{
   --bg: #12151a; --bg-panel: #1a1e24; --bg-raised: #20252c; --bg-inset: #0d1013;
@@ -64,7 +66,7 @@ section{ margin-top:44px; }
   .chart-box{ height:220px; }
   .chart-box.tall{ height:260px; }
   .modal-panel{ padding:18px; }
-  .route-sketch{ min-height:180px; }
+  .route-map{ height:220px; }
   .modal-splits-table th, .modal-splits-table td{ padding:7px 6px; font-size:11.5px; }
 }
 .chart-box{ position:relative; height:260px; }
@@ -168,8 +170,15 @@ footer .update-note b{ color:var(--text-muted); }
 .modal-stat .stat-label{ margin-bottom:6px; }
 .modal-stat .stat-value{ font-size:clamp(15px,3.6vw,18px); }
 .modal-section-title{ font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); margin:22px 0 10px; }
-.route-sketch{ background:var(--bg-inset); border:1px solid var(--border-soft); border-radius:10px; padding:10px; min-height:220px; box-sizing:border-box; }
-.route-sketch svg{ width:100%; height:auto; display:block; }
+.route-map{ height:280px; border-radius:10px; overflow:hidden; border:1px solid var(--border-soft); background:var(--bg-inset); }
+.route-map .empty{ padding:16px; }
+/* Recolor the stock OSM tiles to sit inside the dark console instead of
+   dropping a bright white rectangle into the page. */
+.route-map .leaflet-tile-pane{ filter:invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7); }
+.route-map .leaflet-control-zoom a{ background:var(--bg-raised); color:var(--text); border-color:var(--border) !important; }
+.route-map .leaflet-control-zoom a:hover{ background:var(--bg-panel); }
+.route-map .leaflet-control-attribution{ background:rgba(13,16,19,0.72); color:var(--text-dim); }
+.route-map .leaflet-control-attribution a{ color:var(--text-muted); }
 .route-legend{ display:flex; gap:16px; margin-top:8px; font-size:11px; color:var(--text-muted); }
 .modal-splits-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
 .modal-splits-table th{ text-align:left; font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); }
@@ -534,35 +543,28 @@ function renderSplitsChart(containerId, splits, legendId){
   }
 }
 
-// Route sketch keeps true geographic proportions (no stretch-to-fill) since a
-// distorted shape would misrepresent the actual course — longitude is scaled by
-// cos(latitude) so the sketch isn't stretched east-west at higher latitudes.
-function renderRouteSketch(containerId, points){
-  const container=document.getElementById(containerId); container.innerHTML='';
+// One real Leaflet map per open modal, keyed by container id, so a reopened
+// modal (or a resize while one's open) can find and clean up/resize the
+// right instance instead of leaking map objects every time a run is clicked.
+let ROUTE_MAP_INSTANCES={};
+function renderRouteMap(containerId, points){
+  const container=document.getElementById(containerId);
+  if(!container) return;
   if(!points || points.length<2){ container.innerHTML="<p class='empty'>No GPS route available for this run.</p>"; return; }
-  const lats=points.map(p=>p[0]), lons=points.map(p=>p[1]);
-  const latMid=(Math.min(...lats)+Math.max(...lats))/2;
-  const cosLat=Math.cos(latMid*Math.PI/180)||1;
-  const xs=lons.map(lon=>lon*cosLat);
-  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...lats), maxY=Math.max(...lats);
-  const spanX=(maxX-minX)||0.0005, spanY=(maxY-minY)||0.0005;
-  const {w:W,h:H}=chartSize(container,680,240);
-  const pad=22;
-  const scale=Math.min((W-pad*2)/spanX,(H-pad*2)/spanY);
-  const drawW=spanX*scale, drawH=spanY*scale;
-  const offX=(W-drawW)/2, offY=(H-drawH)/2;
-  const px=x=>offX+(x-minX)*scale;
-  const py=y=>H-(offY+(y-minY)*scale); // flip: latitude increases upward on screen
-  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'xMidYMid meet'});
-  let d=''; points.forEach((p,i)=>{ const x=px(p[1]*cosLat), y=py(p[0]); d+=(i===0?'M':'L')+x+','+y+' '; });
-  svg.appendChild(el('path',{d:d.trim(),fill:'none',stroke:'#e3a857','stroke-width':2.5,'stroke-linejoin':'round','stroke-linecap':'round'}));
-  const start=points[0], endp=points[points.length-1];
-  svg.appendChild(el('circle',{cx:px(start[1]*cosLat),cy:py(start[0]),r:5,fill:'#5fa8a0'}));
-  svg.appendChild(el('circle',{cx:px(endp[1]*cosLat),cy:py(endp[0]),r:5,fill:'#c1614a'}));
-  container.appendChild(svg);
-  const legend=document.createElement('div'); legend.className='route-legend';
-  legend.innerHTML=`<span><span style="color:#5fa8a0;">●</span> Start</span><span><span style="color:#c1614a;">●</span> Finish</span>`;
-  container.insertAdjacentElement('afterend', legend);
+  if(typeof L==='undefined'){ container.innerHTML="<p class='empty'>Map failed to load — check your internet connection and reopen this run.</p>"; return; }
+  if(ROUTE_MAP_INSTANCES[containerId]){ try{ ROUTE_MAP_INSTANCES[containerId].remove(); }catch(e){} delete ROUTE_MAP_INSTANCES[containerId]; }
+  container.innerHTML='';
+  const latlngs=points.map(p=>[p[0],p[1]]);
+  const map=L.map(container,{scrollWheelZoom:false});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    maxZoom:19,
+    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  const line=L.polyline(latlngs,{color:'#e3a857',weight:4,opacity:0.95,lineJoin:'round',lineCap:'round'}).addTo(map);
+  L.circleMarker(latlngs[0],{radius:6,color:'#12151a',weight:2,fillColor:'#5fa8a0',fillOpacity:1}).addTo(map).bindTooltip('Start');
+  L.circleMarker(latlngs[latlngs.length-1],{radius:6,color:'#12151a',weight:2,fillColor:'#c1614a',fillOpacity:1}).addTo(map).bindTooltip('Finish');
+  map.fitBounds(line.getBounds(),{padding:[18,18]});
+  ROUTE_MAP_INSTANCES[containerId]=map;
 }
 
 // Re-drawn on resize so the "match the container's real pixel size" fix above
@@ -575,6 +577,7 @@ function redrawCharts(){
   safe('redraw hrv', ()=>renderSeriesChart('chart-hrv', DATA.hrv, 'hrv', '#5fa8a0'));
   safe('redraw vo2', ()=>renderSeriesChart('chart-vo2', DATA.vo2max, 'vo2', '#e3a857'));
   safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]) renderSplitsChart('chart-splits', DATA.longRuns[ACTIVE_SPLIT_ID].splits, 'splits-legend'); });
+  Object.values(ROUTE_MAP_INSTANCES).forEach(m=>{ try{ m.invalidateSize(); }catch(e){} });
 }
 let _resizeTimer;
 window.addEventListener('resize', ()=>{ clearTimeout(_resizeTimer); _resizeTimer=setTimeout(redrawCharts, 180); });
@@ -754,7 +757,11 @@ safe('run table', function(){
 safe('run detail modal', function(){
   const modal = document.getElementById('run-modal');
   const body = document.getElementById('modal-body');
-  function closeModal(){ modal.style.display='none'; document.body.style.overflow=''; }
+  function closeModal(){
+    modal.style.display='none';
+    document.body.style.overflow='';
+    Object.keys(ROUTE_MAP_INSTANCES).forEach(id=>{ try{ ROUTE_MAP_INSTANCES[id].remove(); }catch(e){} delete ROUTE_MAP_INSTANCES[id]; });
+  }
   document.getElementById('modal-close').addEventListener('click', closeModal);
   modal.addEventListener('click', e=>{ if(e.target===modal) closeModal(); });
   document.addEventListener('keydown', e=>{ if(e.key==='Escape' && modal.style.display!=='none') closeModal(); });
@@ -781,7 +788,7 @@ safe('run detail modal', function(){
         ${stat('Elev Gain', '+'+(run.elevGainFt??0), 'ft')}
       </div>
       <div class="modal-section-title">Route</div>
-      ${route && route.length>1 ? `<div class="route-sketch" id="modal-route"></div>` : `<p class="empty">No GPS route available for this run.</p>`}
+      ${route && route.length>1 ? `<div class="route-map" id="modal-route"></div><div class="route-legend"><span><span style="color:#5fa8a0;">●</span> Start</span><span><span style="color:#c1614a;">●</span> Finish</span></div>` : `<p class="empty">No GPS route available for this run.</p>`}
       <div class="modal-section-title">Mile Splits</div>
       ${splits.length ? `
         <div class="chart-box" style="height:220px;"><div id="modal-splits-chart" class="svg-chart"></div></div>
@@ -794,7 +801,7 @@ safe('run detail modal', function(){
     body.innerHTML = html;
     modal.style.display='flex';
     document.body.style.overflow='hidden';
-    if(route && route.length>1) renderRouteSketch('modal-route', route);
+    if(route && route.length>1) renderRouteMap('modal-route', route);
     if(splits.length) renderSplitsChart('modal-splits-chart', splits, 'modal-splits-legend');
   };
 });

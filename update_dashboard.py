@@ -8,6 +8,8 @@ from garminconnect import Garmin
 # =====================================================================
 HISTORY_DAYS = 180
 LONG_RUN_COUNT = 6          # how many recent long runs to pull mile splits for
+DETAIL_RUN_COUNT = 30       # how many recent runs get full mile-splits for the click-to-expand modal
+ROUTE_RUN_COUNT = 20        # of those, how many also get a GPS route fetch (heavier call)
 HRV_SAMPLE_DAYS = 35        # HRV trend window
 HRV_SAMPLE_STEP = 3         # sample every N days (keeps API calls reasonable)
 VO2_TREND_DAYS = 120
@@ -84,6 +86,9 @@ def parse_run(a):
         "avgHr": a.get("averageHR"),
         "maxHr": a.get("maxHR"),
         "elevGainFt": round(m_to_ft(a.get("elevationGain"))) if a.get("elevationGain") is not None else None,
+        "avgCadence": a.get("averageRunningCadenceInStepsPerMinute"),
+        "maxCadence": a.get("maxRunningCadenceInStepsPerMinute"),
+        "location": a.get("locationName"),
         "type": None,
     }
 
@@ -370,6 +375,41 @@ def parse_vo2_trend(raw):
     entries.sort(key=lambda t: t["date"])
     return entries
 
+def parse_route(details):
+    # GPS polyline shape isn't confirmed against a real typed schema (unlike the
+    # activity-summary fields), so this tries a few shapes seen in the wild and
+    # degrades to None — no route, not a crash — if none match this account's data.
+    if not isinstance(details, dict):
+        return None
+    candidates = None
+    for path in (
+        ("geoPolylineDTO", "polyline"),
+        ("polyline",),
+        ("activityDetailMetrics",),
+    ):
+        val = dig(details, *path)
+        if isinstance(val, list) and val:
+            candidates = val
+            break
+    if not candidates:
+        return None
+    pts = []
+    for p in candidates:
+        lat = lon = None
+        if isinstance(p, dict):
+            lat = p.get("lat") or p.get("latitude")
+            lon = p.get("lon") or p.get("lng") or p.get("longitude")
+        elif isinstance(p, (list, tuple)) and len(p) >= 2:
+            lat, lon = p[0], p[1]
+        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and (lat or lon):
+            pts.append([round(lat, 6), round(lon, 6)])
+    if len(pts) < 2:
+        return None
+    if len(pts) > 150:
+        step = len(pts) / 150
+        pts = [pts[int(i * step)] for i in range(150)]
+    return pts
+
 # =====================================================================
 # Coach-voice insight generators — deterministic pattern detectors, not a
 # live LLM call, so these run for free inside the GitHub Action every time.
@@ -568,24 +608,47 @@ def main():
     acwr = compute_acwr(runs_asc, today)
     load_mix = build_load_mix(runs_asc, today)
 
-    # ---- Long run splits (mile-by-mile, for the N most recent long runs) ----
-    long_run_candidates = [r for r in runs_desc if r["type"] == "Long Run"][:LONG_RUN_COUNT]
-    long_runs_data = {}
-    long_runs_ordered = []  # [(run, splits_list)], most recent first — used by insight detectors
-    for r in long_run_candidates:
-        splits_raw = safe_call(client.get_activity_splits, r["id"])
+    # ---- Per-run detail (mile splits + best-effort GPS route) for the click-to-
+    # expand modal, covering the N most recent runs. Bounded to keep the daily
+    # sync's API-call count and page payload reasonable — older runs still show
+    # their summary stats when clicked, just not lap-by-lap detail.
+    def build_splits(activity_id):
+        splits_raw = safe_call(client.get_activity_splits, activity_id)
         laps = dig(splits_raw, "lapDTOs", default=[]) or []
-        splits = []
+        out = []
         for i, lap in enumerate(laps, start=1):
-            splits.append({
+            out.append({
                 "mile": i,
                 "pace": pace_min_per_mile(lap.get("distance"), lap.get("duration")) or 0,
                 "avgHr": lap.get("averageHR"),
                 "maxHr": lap.get("maxHR"),
                 "elevGainFt": round(m_to_ft(lap.get("elevationGain"))) if lap.get("elevationGain") is not None else 0,
+                "cadence": lap.get("averageRunningCadenceInStepsPerMinute"),
             })
+        return out
+
+    detail_candidates = runs_desc[:DETAIL_RUN_COUNT]
+    run_details = {}
+    for i, r in enumerate(detail_candidates):
+        splits = build_splits(r["id"])
+        route = None
+        if i < ROUTE_RUN_COUNT:
+            details_raw = safe_method_call(client, "get_activity_details", r["id"])
+            route = parse_route(details_raw)
+        if splits or route:
+            run_details[str(r["id"])] = {"splits": splits, "route": route}
+
+    # ---- Long run splits panel (mile-by-mile, for the N most recent long runs) —
+    # reuses the detail fetch above when the long run falls inside that window.
+    long_run_candidates = [r for r in runs_desc if r["type"] == "Long Run"][:LONG_RUN_COUNT]
+    long_runs_data = {}
+    long_runs_ordered = []  # [(run, splits_list)], most recent first — used by insight detectors
+    for r in long_run_candidates:
+        rid = str(r["id"])
+        cached = run_details.get(rid)
+        splits = cached["splits"] if cached else build_splits(r["id"])
         if splits:
-            long_runs_data[str(r["id"])] = {"label": f"{r['dateLabel']} — {r['name']} ({r['distMi']:.1f}mi)", "splits": splits}
+            long_runs_data[rid] = {"label": f"{r['dateLabel']} — {r['name']} ({r['distMi']:.1f}mi)", "splits": splits}
             long_runs_ordered.append((r, splits))
 
     # ---- Today's health snapshot ----
@@ -672,11 +735,13 @@ def main():
             "phase": phase,
             "syncRangeStart": start_history.isoformat(),
             "syncRangeEnd": today.isoformat(),
+            "detailRunCount": DETAIL_RUN_COUNT,
         },
         "recommendation": recommendation,
         "runs": [{k: v for k, v in r.items() if k not in ("distance_m", "duration_s")} for r in runs_desc],
         "weekly": weeks,
         "longRuns": long_runs_data,
+        "runDetails": run_details,
         "vo2max": vo2_series,
         "vo2maxToday": vo2max_today,
         "hrv": hrv_series,
@@ -837,13 +902,14 @@ HTML_SHELL = r"""<!DOCTYPE html>
       <div class="tab-row" id="split-tabs"></div>
       <div class="split-meta" id="split-meta"></div>
       <div class="chart-box tall"><div id="chart-splits" class="svg-chart"></div></div>
+      <div class="legend-row" id="splits-legend"></div>
     </div>
   </section>
 
   <section>
     <div class="section-head">
       <div class="section-title"><span class="section-index">07</span> Full Run Log</div>
-      <div class="section-note" id="table-note">Click a column to sort.</div>
+      <div class="section-note" id="table-note">Click a column to sort · click a row for splits, cadence, HR and route.</div>
     </div>
     <div class="panel">
       <div class="table-controls">
@@ -877,6 +943,12 @@ HTML_SHELL = r"""<!DOCTYPE html>
     <div>Source: Garmin Connect</div>
   </footer>
 </div>
+<div id="run-modal" class="modal-overlay" style="display:none;">
+  <div class="modal-panel">
+    <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
 <div id="chart-tooltip"></div>
 <script>const DATA = __DATA_JSON__;</script>
 <script>__JS__</script>
@@ -904,34 +976,47 @@ body{ background:var(--bg); color:var(--text); font-family:var(--font-body); lin
 .console-header{ border-bottom:1px solid var(--border); background: radial-gradient(ellipse 900px 300px at 15% -20%, rgba(227,168,87,0.10), transparent), var(--bg); padding:28px 0 22px; }
 .header-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:24px; flex-wrap:wrap; }
 .brand-eyebrow{ font-family:var(--font-mono); font-size:11px; letter-spacing:0.14em; color:var(--amber); text-transform:uppercase; display:block; margin-bottom:6px; }
-h1{ font-family:var(--font-display); font-weight:700; font-size:30px; letter-spacing:-0.01em; text-wrap:balance; }
+h1{ font-family:var(--font-display); font-weight:700; font-size:clamp(21px,5.5vw,30px); letter-spacing:-0.01em; text-wrap:balance; }
 .sync-badge{ font-family:var(--font-mono); font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); white-space:nowrap; }
 .sync-dot{ width:7px; height:7px; border-radius:50%; background:var(--teal); box-shadow:0 0 8px var(--teal); flex-shrink:0; }
 .countdown-strip{ margin-top:22px; display:flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:var(--bg-panel); flex-wrap:wrap; }
 .countdown-cell{ flex:1; padding:16px 20px; border-right:1px solid var(--border-soft); display:flex; flex-direction:column; gap:4px; min-width:130px; }
 .countdown-cell:last-child{ border-right:none; }
 .cc-label{ font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); font-family:var(--font-mono); }
-.cc-value{ font-family:var(--font-mono); font-size:24px; font-weight:600; color:var(--text); }
+.cc-value{ font-family:var(--font-mono); font-size:clamp(17px,4.5vw,24px); font-weight:600; color:var(--text); }
 .cc-value.accent{ color:var(--amber); }
 .cc-sub{ font-size:12px; color:var(--text-muted); }
 .boot-errors{ margin-top:16px; padding:12px 16px; border:1px solid var(--clay); background:var(--clay-dim); border-radius:8px; font-family:var(--font-mono); font-size:12px; color:var(--clay); }
 .stat-strip{ display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-top:28px; }
 .stat-cell{ background:var(--bg-panel); padding:18px 18px 16px; }
 .stat-label{ font-size:11px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-dim); font-family:var(--font-mono); margin-bottom:8px; }
-.stat-value{ font-family:var(--font-mono); font-size:26px; font-weight:600; font-variant-numeric:tabular-nums; }
+.stat-value{ font-family:var(--font-mono); font-size:clamp(19px,4.4vw,26px); font-weight:600; font-variant-numeric:tabular-nums; }
 .stat-unit{ font-size:13px; color:var(--text-muted); font-weight:400; margin-left:3px; }
 .stat-delta{ font-size:12px; margin-top:5px; color:var(--text-muted); }
 .stat-delta.up{ color:var(--teal); }
 .stat-delta.warn{ color:var(--clay); }
 section{ margin-top:44px; }
 .section-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:16px; gap:16px; flex-wrap:wrap; }
-.section-title{ font-family:var(--font-display); font-weight:600; font-size:19px; display:flex; align-items:center; gap:10px; }
+.section-title{ font-family:var(--font-display); font-weight:600; font-size:clamp(16px,3.6vw,19px); display:flex; align-items:center; gap:10px; }
 .section-index{ font-family:var(--font-mono); color:var(--amber); font-size:13px; }
 .section-note{ font-size:13px; color:var(--text-muted); max-width:440px; text-align:right; }
 .panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:22px; }
 .panel-split{ display:grid; grid-template-columns:1.4fr 1fr; gap:16px; }
 .panel-triple{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
 @media (max-width:860px){ .panel-split, .panel-triple{ grid-template-columns:1fr; } .stat-strip{ grid-template-columns:repeat(2,1fr); } }
+@media (max-width:640px){
+  .wrap{ padding:0 14px; }
+  .console-header{ padding:20px 0 16px; }
+  .panel{ padding:15px; }
+  .section-note{ text-align:left; max-width:none; }
+  .stat-cell{ padding:14px 14px 12px; }
+  .countdown-cell{ padding:12px 14px; min-width:100px; }
+  .chart-box{ height:220px; }
+  .chart-box.tall{ height:260px; }
+  .modal-panel{ padding:18px; }
+  .route-sketch{ min-height:180px; }
+  .modal-splits-table th, .modal-splits-table td{ padding:7px 6px; font-size:11.5px; }
+}
 .chart-box{ position:relative; height:260px; }
 .chart-box.tall{ height:320px; }
 .svg-chart{ width:100%; height:100%; }
@@ -957,7 +1042,7 @@ section{ margin-top:44px; }
 .insight-text{ font-size:13.5px; color:var(--text); line-height:1.55; }
 .insight-text b{ color:var(--text); font-weight:600; }
 .dial-row{ display:flex; gap:22px; align-items:center; }
-.dial-num{ font-family:var(--font-mono); font-size:34px; font-weight:600; }
+.dial-num{ font-family:var(--font-mono); font-size:clamp(24px,6vw,34px); font-weight:600; }
 .dial-label{ font-size:12px; color:var(--text-muted); margin-top:2px; }
 .badge{ display:inline-block; font-family:var(--font-mono); font-size:11px; padding:3px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:0.05em; }
 .badge.high, .badge.good{ background:var(--teal-dim); color:var(--teal); }
@@ -975,7 +1060,7 @@ section{ margin-top:44px; }
 .rec-panel.tone-caution{ border-left-color:var(--clay); }
 .rec-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; flex-wrap:wrap; gap:8px; }
 .rec-eyebrow{ font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); }
-.rec-headline{ font-family:var(--font-display); font-size:19px; font-weight:600; margin-bottom:10px; }
+.rec-headline{ font-family:var(--font-display); font-size:clamp(16px,3.8vw,19px); font-weight:600; margin-bottom:10px; text-wrap:balance; }
 .tone-good .rec-headline{ color:var(--teal); }
 .tone-caution .rec-headline{ color:var(--clay); }
 .rec-notes{ list-style:none; display:flex; flex-direction:column; gap:6px; }
@@ -1016,10 +1101,29 @@ tbody tr:hover{ background:var(--bg-raised); }
 .type-pill.Benchmark{ background:var(--teal-dim); color:var(--teal); }
 .type-pill.Strides{ background:var(--bg-inset); color:var(--text-dim); }
 .table-scroll{ overflow-x:auto; }
+tbody tr.run-row{ cursor:pointer; }
 footer{ margin-top:56px; padding-top:22px; border-top:1px solid var(--border); display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; font-size:12.5px; color:var(--text-dim); }
 footer .update-note{ max-width:560px; }
 footer .update-note b{ color:var(--text-muted); }
 .empty{ color:var(--text-dim); font-size:0.85rem; }
+
+.modal-overlay{ position:fixed; inset:0; background:rgba(13,16,19,0.72); backdrop-filter:blur(2px); z-index:1000; display:flex; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto; }
+.modal-panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:14px; max-width:760px; width:100%; padding:24px; position:relative; margin-bottom:40px; }
+.modal-close{ position:absolute; top:14px; right:14px; background:var(--bg-raised); border:1px solid var(--border); color:var(--text-muted); width:32px; height:32px; border-radius:8px; font-size:18px; cursor:pointer; line-height:1; }
+.modal-close:hover{ color:var(--text); border-color:var(--text-dim); }
+.modal-title{ font-family:var(--font-display); font-weight:700; font-size:clamp(18px,3.8vw,22px); margin-bottom:4px; padding-right:40px; text-wrap:balance; }
+.modal-sub{ font-family:var(--font-mono); font-size:12px; color:var(--text-muted); margin-bottom:18px; }
+.modal-stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-bottom:22px; }
+.modal-stat{ background:var(--bg-raised); padding:12px 14px; }
+.modal-stat .stat-label{ margin-bottom:6px; }
+.modal-stat .stat-value{ font-size:clamp(15px,3.6vw,18px); }
+.modal-section-title{ font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); margin:22px 0 10px; }
+.route-sketch{ background:var(--bg-inset); border:1px solid var(--border-soft); border-radius:10px; padding:10px; min-height:220px; box-sizing:border-box; }
+.route-sketch svg{ width:100%; height:auto; display:block; }
+.route-legend{ display:flex; gap:16px; margin-top:8px; font-size:11px; color:var(--text-muted); }
+.modal-splits-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+.modal-splits-table th{ text-align:left; font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); }
+.modal-splits-table td{ padding:8px 10px; border-bottom:1px solid var(--border-soft); font-family:var(--font-mono); }
 """
 
 JS = r"""
@@ -1035,11 +1139,44 @@ const tooltip = document.getElementById('chart-tooltip');
 function showTooltip(evt, html){ tooltip.innerHTML=html; tooltip.style.display='block'; positionTooltip(evt); }
 function positionTooltip(evt){ const pad=14; let x=evt.clientX+pad, y=evt.clientY+pad; const tw=tooltip.offsetWidth||180, th=tooltip.offsetHeight||60; if(x+tw>window.innerWidth-10) x=evt.clientX-tw-pad; if(y+th>window.innerHeight-10) y=evt.clientY-th-pad; tooltip.style.left=x+'px'; tooltip.style.top=y+'px'; }
 function hideTooltip(){ tooltip.style.display='none'; }
+// Chart internal coordinate size is derived from the container's ACTUAL rendered
+// pixel size (not a fixed design size stretched to fit). Previously every chart
+// used a hardcoded viewBox with preserveAspectRatio="none", which non-uniformly
+// stretched the SVG to fill whatever box CSS gave it — fine near the design's
+// own aspect ratio, but visibly warped text and dots on narrow phone widths
+// where the real aspect ratio diverges a lot. Matching W/H to the real box means
+// there's no stretch to begin with, so nothing distorts at any viewport size.
+function chartSize(container, fallbackW, fallbackH){
+  const rect = container.getBoundingClientRect();
+  const w = Math.max(Math.round(rect.width) || fallbackW, 220);
+  const h = Math.max(Math.round(rect.height) || fallbackH, 140);
+  return {w, h};
+}
+// Which indices get an x-axis label, figured from the ACTUAL plot width (which
+// now varies by device, see chartSize above) rather than a label-count guess
+// tuned for one fixed desktop width. Always includes the last point (usually
+// the most recent/interesting one), but swaps it in for — rather than adds it
+// next to — the nearest regularly-spaced label when the two would land closer
+// than minGapPx apart and collide.
+function labelIndices(n, plotWidthPx, minGapPx){
+  if(n<=1) return new Set([0]);
+  const perIdx = plotWidthPx/n;
+  const step = Math.max(1, Math.ceil(minGapPx/perIdx));
+  const idxs=[];
+  for(let i=0;i<n;i+=step) idxs.push(i);
+  if(!idxs.length) idxs.push(0);
+  const last=idxs[idxs.length-1];
+  if(last!==n-1){
+    if((n-1-last)*perIdx >= minGapPx) idxs.push(n-1);
+    else idxs[idxs.length-1]=n-1;
+  }
+  return new Set(idxs);
+}
 
 function renderVolumeChart(containerId, weekly){
   const container=document.getElementById(containerId); container.innerHTML='';
   if(!weekly.length){ container.innerHTML="<p class='empty'>No weekly data yet.</p>"; return; }
-  const W=720,H=300,M={top:26,right:40,bottom:34,left:42};
+  const {w:W,h:H}=chartSize(container,720,300), M={top:26,right:40,bottom:34,left:42};
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
   const maxMiles=Math.max(...weekly.map(w=>w.miles),1);
@@ -1048,6 +1185,7 @@ function renderVolumeChart(containerId, weekly){
   const runsMax=Math.max(6,...weekly.map(w=>w.runs));
   const y1Scale=v=>M.top+plotH-(v/runsMax)*plotH;
   const n=weekly.length, bandW=plotW/n, xCenter=i=>M.left+bandW*i+bandW/2;
+  const volLabels=labelIndices(n, plotW, 34);
   yTicks.forEach(t=>{ svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:yScale(t),y2:yScale(t)})); const lbl=el('text',{x:M.left-8,y:yScale(t)+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
   const yTitle=el('text',{x:10,y:12}); yTitle.textContent='miles'; svg.appendChild(yTitle);
   const y1Title=el('text',{x:W-M.right,y:12,'text-anchor':'end'}); y1Title.textContent='runs/wk'; svg.appendChild(y1Title);
@@ -1065,7 +1203,7 @@ function renderVolumeChart(containerId, weekly){
       lrBar.addEventListener('mousemove',positionTooltip); lrBar.addEventListener('mouseleave',hideTooltip);
       svg.appendChild(lrBar);
     }
-    if(n<=10 || i%2===0){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.label; svg.appendChild(xl); }
+    if(volLabels.has(i)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.label; svg.appendChild(xl); }
   });
   let linePath=''; weekly.forEach((w,i)=>{ const x=xCenter(i), y=y1Scale(w.runs); linePath+=(i===0?'M':'L')+x+','+y+' '; });
   svg.appendChild(el('path',{d:linePath.trim(),fill:'none',stroke:'#5fa8a0','stroke-width':2}));
@@ -1079,7 +1217,7 @@ function renderPaceChart(containerId, runsAsc){
   const container=document.getElementById(containerId); container.innerHTML='';
   const runs=runsAsc.filter(r=>r.paceMinMi);
   if(runs.length<2){ container.innerHTML="<p class='empty'>Not enough paced runs yet.</p>"; return; }
-  const W=720,H=300,M={top:26,right:20,bottom:34,left:50};
+  const {w:W,h:H}=chartSize(container,720,300), M={top:26,right:20,bottom:34,left:50};
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
   const rolling=runs.map((r,i)=>{ const w=runs.slice(Math.max(0,i-4),i+1); return w.reduce((s,x)=>s+x.paceMinMi,0)/w.length; });
@@ -1090,8 +1228,8 @@ function renderPaceChart(containerId, runsAsc){
   const n=runs.length, xScale=i=>n<=1?M.left+plotW/2:M.left+(i/(n-1))*plotW;
   yTicks.forEach(t=>{ const y=yScale(t); svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-8,y:y+3,'text-anchor':'end'}); lbl.textContent=paceStr(t); svg.appendChild(lbl); });
   const yTitle=el('text',{x:6,y:12}); yTitle.textContent='min/mile'; svg.appendChild(yTitle);
-  const labelEvery=Math.ceil(n/13);
-  runs.forEach((r,i)=>{ if(i%labelEvery===0||i===n-1){ const xl=el('text',{x:xScale(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=r.dateLabel; svg.appendChild(xl); } });
+  const paceLabels=labelIndices(n, plotW, 34);
+  runs.forEach((r,i)=>{ if(paceLabels.has(i)){ const xl=el('text',{x:xScale(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=r.dateLabel; svg.appendChild(xl); } });
   let path=''; runs.forEach((r,i)=>{ path+=(i===0?'M':'L')+xScale(i)+','+yScale(rolling[i])+' '; });
   svg.appendChild(el('path',{d:path.trim(),fill:'none',stroke:'#e7e9ec','stroke-width':1.5,'stroke-dasharray':'4,3'}));
   runs.forEach((r,i)=>{ const c=el('circle',{class:'data-point',cx:xScale(i),cy:yScale(r.paceMinMi),r:5,fill:TYPE_COLORS[r.type]||'#8b95a1'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${r.name}</div><div class="tt-row">${fmtDate(r.date)} · ${r.type}</div><div class="tt-row">Pace: <b>${paceStr(r.paceMinMi)}/mi</b></div><div class="tt-row">Dist: <b>${r.distMi.toFixed(1)}mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
@@ -1104,7 +1242,7 @@ function renderSeriesChart(containerId, series, valueKey, color){
   const container=document.getElementById(containerId); container.innerHTML='';
   const pts=series.filter(p=>typeof p[valueKey]==='number');
   if(pts.length<2){ container.innerHTML="<p class='empty'>Not enough data yet.</p>"; return; }
-  const W=420,H=190,M={top:12,right:12,bottom:26,left:32};
+  const {w:W,h:H}=chartSize(container,420,190), M={top:12,right:12,bottom:26,left:32};
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
   const vals=pts.map(p=>p[valueKey]);
@@ -1113,8 +1251,8 @@ function renderSeriesChart(containerId, series, valueKey, color){
   const yScale=v=>M.top+plotH-((v-yMin)/(yMax-yMin))*plotH;
   const n=pts.length, xScale=i=>n<=1?M.left+plotW/2:M.left+(i/(n-1))*plotW;
   yTicks.forEach(t=>{ const y=yScale(t); svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-6,y:y+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
-  const labelEvery=Math.ceil(n/5);
-  pts.forEach((p,i)=>{ if(i%labelEvery===0||i===n-1){ const xl=el('text',{x:xScale(i),y:H-M.bottom+14,'text-anchor':'middle'}); xl.textContent=fmtDate(p.date); svg.appendChild(xl); } });
+  const seriesLabels=labelIndices(n, plotW, 40);
+  pts.forEach((p,i)=>{ if(seriesLabels.has(i)){ const xl=el('text',{x:xScale(i),y:H-M.bottom+14,'text-anchor':'middle'}); xl.textContent=fmtDate(p.date); svg.appendChild(xl); } });
   let linePath='', areaPath='';
   pts.forEach((p,i)=>{ const x=xScale(i), y=yScale(p[valueKey]); linePath+=(i===0?'M':'L')+x+','+y+' '; areaPath+=(i===0?'M':'L')+x+','+y+' '; });
   areaPath+=`L${xScale(n-1)},${M.top+plotH} L${xScale(0)},${M.top+plotH} Z`;
@@ -1126,13 +1264,14 @@ function renderSeriesChart(containerId, series, valueKey, color){
   container.appendChild(svg);
 }
 
-function renderSplitsChart(containerId, splits){
+function renderSplitsChart(containerId, splits, legendId){
   const container=document.getElementById(containerId); container.innerHTML='';
-  if(!splits.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; return; }
-  const W=720,H=320,M={top:30,right:46,bottom:34,left:50};
+  if(!splits.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; if(legendId){ const lg=document.getElementById(legendId); if(lg) lg.innerHTML=''; } return; }
+  const {w:W,h:H}=chartSize(container,720,320), M={top:28,right:20,bottom:34,left:50};
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
   const n=splits.length, bandW=plotW/n, xCenter=i=>M.left+bandW*i+bandW/2;
+  const mileLabels=labelIndices(n, plotW, 26);
   const paces=splits.map(s=>s.pace).filter(p=>p>0);
   const paceMin=Math.min(...paces)-0.4, paceMax=Math.max(...paces)+0.4;
   const paceTop=M.top, paceBottom=M.top+plotH;
@@ -1145,15 +1284,15 @@ function renderSplitsChart(containerId, splits){
   const elevCapPx=plotH*0.32, yElev=v=>(v/maxElev)*elevCapPx;
   const paceTicks=niceTicks(paceMin,paceMax,5);
   paceTicks.forEach(t=>{ const y=yPace(t); if(y<M.top-1||y>M.top+plotH+1) return; svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-8,y:y+3,'text-anchor':'end'}); lbl.textContent=paceStr(t); svg.appendChild(lbl); });
-  const yTitle=el('text',{x:6,y:M.top-14}); yTitle.textContent='min/mi'; svg.appendChild(yTitle);
-  const y1Title=el('text',{x:W-M.right,y:M.top-14,'text-anchor':'end'}); y1Title.textContent='bpm'; svg.appendChild(y1Title);
+  const yTitle=el('text',{x:6,y:12}); yTitle.textContent='min/mi'; svg.appendChild(yTitle);
+  const y1Title=el('text',{x:W-M.right,y:12,'text-anchor':'end'}); y1Title.textContent='bpm'; svg.appendChild(y1Title);
   splits.forEach((s,i)=>{
     const cx=xCenter(i), barW=bandW*0.55, h=yElev(s.elevGainFt||0);
     const bar=el('rect',{class:'data-point',x:cx-barW/2,y:(M.top+plotH)-h,width:barW,height:h,fill:'#22262d'});
     bar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Mile ${s.mile}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`));
     bar.addEventListener('mousemove',positionTooltip); bar.addEventListener('mouseleave',hideTooltip);
     svg.appendChild(bar);
-    const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent='Mi '+s.mile; svg.appendChild(xl);
+    if(mileLabels.has(i)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent='Mi '+s.mile; svg.appendChild(xl); }
   });
   let pacePath=''; splits.forEach((s,i)=>{ pacePath+=(i===0?'M':'L')+xCenter(i)+','+yPace(s.pace)+' '; });
   svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2.5}));
@@ -1165,11 +1304,62 @@ function renderSplitsChart(containerId, splits){
   }
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
-  const legendItems=[{c:'#e3a857',t:'Pace'},{c:'#c1614a',t:'Avg HR'},{c:'#22262d',t:'Elevation gain'}];
-  let lx=M.left;
-  legendItems.forEach(item=>{ svg.appendChild(el('rect',{x:lx,y:4,width:9,height:9,rx:2,fill:item.c})); const t=el('text',{x:lx+13,y:12}); t.textContent=item.t; svg.appendChild(t); lx+=13+item.t.length*5.6+14; });
   container.appendChild(svg);
+  // Legend lives in its own HTML row (not SVG text) so it wraps naturally on
+  // narrow screens instead of colliding with the axis titles at a fixed pixel spot.
+  if(legendId){
+    const lg=document.getElementById(legendId);
+    if(lg){
+      const legendItems=[{c:'#e3a857',t:'Pace'},{c:'#c1614a',t:'Avg HR'},{c:'#22262d',t:'Elevation gain'}];
+      lg.innerHTML = legendItems.map(it=>`<div class="legend-item"><span class="legend-swatch" style="background:${it.c}"></span>${it.t}</div>`).join('');
+    }
+  }
 }
+
+// Route sketch keeps true geographic proportions (no stretch-to-fill) since a
+// distorted shape would misrepresent the actual course — longitude is scaled by
+// cos(latitude) so the sketch isn't stretched east-west at higher latitudes.
+function renderRouteSketch(containerId, points){
+  const container=document.getElementById(containerId); container.innerHTML='';
+  if(!points || points.length<2){ container.innerHTML="<p class='empty'>No GPS route available for this run.</p>"; return; }
+  const lats=points.map(p=>p[0]), lons=points.map(p=>p[1]);
+  const latMid=(Math.min(...lats)+Math.max(...lats))/2;
+  const cosLat=Math.cos(latMid*Math.PI/180)||1;
+  const xs=lons.map(lon=>lon*cosLat);
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...lats), maxY=Math.max(...lats);
+  const spanX=(maxX-minX)||0.0005, spanY=(maxY-minY)||0.0005;
+  const {w:W,h:H}=chartSize(container,680,240);
+  const pad=22;
+  const scale=Math.min((W-pad*2)/spanX,(H-pad*2)/spanY);
+  const drawW=spanX*scale, drawH=spanY*scale;
+  const offX=(W-drawW)/2, offY=(H-drawH)/2;
+  const px=x=>offX+(x-minX)*scale;
+  const py=y=>H-(offY+(y-minY)*scale); // flip: latitude increases upward on screen
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'xMidYMid meet'});
+  let d=''; points.forEach((p,i)=>{ const x=px(p[1]*cosLat), y=py(p[0]); d+=(i===0?'M':'L')+x+','+y+' '; });
+  svg.appendChild(el('path',{d:d.trim(),fill:'none',stroke:'#e3a857','stroke-width':2.5,'stroke-linejoin':'round','stroke-linecap':'round'}));
+  const start=points[0], endp=points[points.length-1];
+  svg.appendChild(el('circle',{cx:px(start[1]*cosLat),cy:py(start[0]),r:5,fill:'#5fa8a0'}));
+  svg.appendChild(el('circle',{cx:px(endp[1]*cosLat),cy:py(endp[0]),r:5,fill:'#c1614a'}));
+  container.appendChild(svg);
+  const legend=document.createElement('div'); legend.className='route-legend';
+  legend.innerHTML=`<span><span style="color:#5fa8a0;">●</span> Start</span><span><span style="color:#c1614a;">●</span> Finish</span>`;
+  container.insertAdjacentElement('afterend', legend);
+}
+
+// Re-drawn on resize so the "match the container's real pixel size" fix above
+// actually keeps charts crisp as the viewport changes (rotation, window resize,
+// devtools panel toggling) instead of only getting it right on first paint.
+let RUNS_ASC=null, ACTIVE_SPLIT_ID=null;
+function redrawCharts(){
+  safe('redraw volume', ()=>renderVolumeChart('chart-volume', DATA.weekly));
+  safe('redraw pace', ()=>{ if(RUNS_ASC) renderPaceChart('chart-pace', RUNS_ASC); });
+  safe('redraw hrv', ()=>renderSeriesChart('chart-hrv', DATA.hrv, 'hrv', '#5fa8a0'));
+  safe('redraw vo2', ()=>renderSeriesChart('chart-vo2', DATA.vo2max, 'vo2', '#e3a857'));
+  safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]) renderSplitsChart('chart-splits', DATA.longRuns[ACTIVE_SPLIT_ID].splits, 'splits-legend'); });
+}
+let _resizeTimer;
+window.addEventListener('resize', ()=>{ clearTimeout(_resizeTimer); _resizeTimer=setTimeout(redrawCharts, 180); });
 
 safe('header', function(){
   const m = DATA.meta;
@@ -1227,6 +1417,7 @@ safe('weekly volume chart', function(){ renderVolumeChart('chart-volume', DATA.w
 
 safe('pace progression chart', function(){
   const runsAsc = [...DATA.runs].sort((a,b)=> new Date(a.date)-new Date(b.date));
+  RUNS_ASC = runsAsc;
   renderPaceChart('chart-pace', runsAsc);
   const types = [...new Set(DATA.runs.map(r=>r.type))];
   document.getElementById('pace-legend').innerHTML = types.map(t=>`<div class="legend-item"><span class="legend-swatch" style="background:${TYPE_COLORS[t]}"></span>${t}</div>`).join('') + `<div class="legend-item"><span class="legend-swatch" style="background:#e7e9ec"></span>5-run rolling avg</div>`;
@@ -1287,6 +1478,7 @@ safe('long run splits', function(){
   if(!ids.length){ document.getElementById('splits-panel').innerHTML = "<p class='empty'>No long runs with lap data in this window yet.</p>"; return; }
   function renderSplit(id){
     const lr = longRuns[id];
+    ACTIVE_SPLIT_ID = id;
     document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.id===id));
     const paced = lr.splits.filter(s=>s.pace>0);
     const avgPace = paced.length ? paced.reduce((s,x)=>s+x.pace,0)/paced.length : null;
@@ -1301,7 +1493,7 @@ safe('long run splits', function(){
       <div class="split-meta-item"><div class="stat-label">Elev Gain</div><div class="val">${totalGain} ft</div></div>
       <div class="split-meta-item"><div class="stat-label">Fastest / Slowest Mile</div><div class="val">${fastest?paceStr(fastest.pace):'—'} → ${slowest?paceStr(slowest.pace):'—'}</div></div>
     `;
-    renderSplitsChart('chart-splits', lr.splits);
+    renderSplitsChart('chart-splits', lr.splits, 'splits-legend');
   }
   document.getElementById('split-tabs').innerHTML = ids.map(id=>`<button class="tab-btn" data-id="${id}">${longRuns[id].label}</button>`).join('');
   document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>renderSplit(b.dataset.id)));
@@ -1317,7 +1509,7 @@ safe('run table', function(){
     rows.sort((a,b)=>{ const av=a[sortKey], bv=b[sortKey]; if(typeof av==='string') return av.localeCompare(bv)*sortDir; return ((av??0)-(bv??0))*sortDir; });
     document.getElementById('table-count').textContent = `${rows.length} of ${DATA.runs.length} runs`;
     document.getElementById('run-table-body').innerHTML = rows.map(r=>`
-      <tr>
+      <tr class="run-row" data-id="${r.id}" title="View splits, cadence, HR and route">
         <td>${fmtDate(r.date)}</td>
         <td class="name-cell">${r.name}</td>
         <td><span class="type-pill ${r.type.replace(/\s/g,'-')}">${r.type}</span></td>
@@ -1333,8 +1525,60 @@ safe('run table', function(){
   document.querySelectorAll('thead th').forEach(th=>{ th.addEventListener('click',()=>{ const key=th.dataset.key; if(sortKey===key){sortDir*=-1;} else {sortKey=key; sortDir = key==='date'?-1:1;} render(); }); });
   document.getElementById('filter-type').addEventListener('change', e=>{ filterType=e.target.value; render(); });
   document.getElementById('filter-search').addEventListener('input', e=>{ filterSearch=e.target.value; render(); });
-  document.getElementById('table-note').textContent = `All ${DATA.runs.length} runs, past ${Math.round((new Date(DATA.meta.syncRangeEnd)-new Date(DATA.meta.syncRangeStart))/86400000/30)} months. Click a column to sort.`;
+  document.getElementById('run-table-body').addEventListener('click', e=>{
+    const tr = e.target.closest('tr[data-id]');
+    if(tr) openRunModal(tr.dataset.id);
+  });
+  document.getElementById('table-note').textContent = `All ${DATA.runs.length} runs, past ${Math.round((new Date(DATA.meta.syncRangeEnd)-new Date(DATA.meta.syncRangeStart))/86400000/30)} months. Click a column to sort, click a row for details.`;
   render();
+});
+
+safe('run detail modal', function(){
+  const modal = document.getElementById('run-modal');
+  const body = document.getElementById('modal-body');
+  function closeModal(){ modal.style.display='none'; document.body.style.overflow=''; }
+  document.getElementById('modal-close').addEventListener('click', closeModal);
+  modal.addEventListener('click', e=>{ if(e.target===modal) closeModal(); });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape' && modal.style.display!=='none') closeModal(); });
+
+  window.openRunModal = function(id){
+    const run = DATA.runs.find(r=>String(r.id)===String(id));
+    if(!run) return;
+    const detail = (DATA.runDetails && DATA.runDetails[String(id)]) || {};
+    const splits = detail.splits || [];
+    const route = detail.route || null;
+    const cap = DATA.meta.detailRunCount;
+
+    const stat = (label, value, unit) => `<div class="modal-stat"><div class="stat-label">${label}</div><div class="stat-value">${value}${unit?`<span class="stat-unit">${unit}</span>`:''}</div></div>`;
+    let html = `
+      <div class="modal-title">${run.name}</div>
+      <div class="modal-sub">${fmtDate(run.date)} · <span class="type-pill ${run.type.replace(/\s/g,'-')}">${run.type}</span>${run.location?` · ${run.location}`:''}</div>
+      <div class="modal-stats">
+        ${stat('Distance', run.distMi.toFixed(2), 'mi')}
+        ${stat('Time', durStr(run.durMin))}
+        ${stat('Pace', paceStr(run.paceMinMi), '/mi')}
+        ${stat('Avg HR', run.avgHr??'—', run.avgHr?'bpm':'')}
+        ${stat('Max HR', run.maxHr??'—', run.maxHr?'bpm':'')}
+        ${stat('Cadence', run.avgCadence?Math.round(run.avgCadence):'—', run.avgCadence?'spm':'')}
+        ${stat('Elev Gain', '+'+(run.elevGainFt??0), 'ft')}
+      </div>
+      <div class="modal-section-title">Route</div>
+      ${route && route.length>1 ? `<div class="route-sketch" id="modal-route"></div>` : `<p class="empty">No GPS route available for this run.</p>`}
+      <div class="modal-section-title">Mile Splits</div>
+      ${splits.length ? `
+        <div class="chart-box" style="height:220px;"><div id="modal-splits-chart" class="svg-chart"></div></div>
+        <div class="legend-row" id="modal-splits-legend"></div>
+        <div class="table-scroll" style="margin-top:12px;"><table class="modal-splits-table"><thead><tr><th>Mile</th><th>Pace</th><th>Avg HR</th><th>Cadence</th><th>Elev+</th></tr></thead><tbody>
+        ${splits.map(s=>`<tr><td>${s.mile}</td><td>${paceStr(s.pace)}/mi</td><td>${s.avgHr??'—'}</td><td>${s.cadence?Math.round(s.cadence):'—'}</td><td>+${s.elevGainFt||0}ft</td></tr>`).join('')}
+        </tbody></table></div>`
+        : `<p class="empty">Lap-by-lap detail isn't available for this run${cap?` (kept for the most recent ${cap} runs only, to keep the daily sync reasonably fast).`:'.'}</p>`}
+    `;
+    body.innerHTML = html;
+    modal.style.display='flex';
+    document.body.style.overflow='hidden';
+    if(route && route.length>1) renderRouteSketch('modal-route', route);
+    if(splits.length) renderSplitsChart('modal-splits-chart', splits, 'modal-splits-legend');
+  };
 });
 """
 

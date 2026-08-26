@@ -15,6 +15,17 @@ HRV_SAMPLE_DAYS = 35        # HRV trend window
 HRV_SAMPLE_STEP = 3         # sample every N days (keeps API calls reasonable)
 VO2_TREND_DAYS = 120
 
+CARTO_API_KEY = os.environ.get("CARTO_API_KEY", "")  # optional, see setup guide's v10 update — the route
+                                                        # map uses CARTO Voyager (Google Maps–style) tiles
+                                                        # when this is set, and falls back to plain
+                                                        # OpenStreetMap tiles (the old look) when it's empty.
+                                                        # This key ends up in the page's own client-side JS
+                                                        # (the map is rendered in the viewer's browser, so it
+                                                        # has to be), not just a server-side secret — fine for
+                                                        # CARTO's free tier (no account or billing tied to it,
+                                                        # 5M requests/month), but worth knowing if your repo
+                                                        # is public.
+
 RACE_DATE = date(2026, 11, 8)
 RACE_NAME = "Monterey Bay Half Marathon"
 GOAL_TIME_SEC = 2 * 3600 + 14 * 60        # sub-2:14 PR goal
@@ -737,7 +748,8 @@ def insight_terrain(runs_asc, long_run_splits_by_id, today):
             if splits:
                 steepest = max(splits["splits"], key=lambda s: s.get("elevGainFt") or 0)
                 if steepest.get("elevGainFt"):
-                    extra = f" Mile {steepest['mile']} alone carried {steepest['elevGainFt']}ft of that gain and slowed to {fmt_pace_mmss(steepest['pace'])}/mi."
+                    unit = "Mile" if splits.get("mileBased", True) else "Lap"
+                    extra = f" {unit} {steepest['mile']} alone carried {steepest['elevGainFt']}ft of that gain and slowed to {fmt_pace_mmss(steepest['pace'])}/mi."
             return {"type": "watch", "icon": "TERRAIN",
                     "html": (f"The {r['dateLabel']} {r['name']} run came in noticeably slower than usual: "
                              f"{fmt_pace_mmss(r['paceMinMi'])}/mi against a typical {fmt_pace_mmss(typical_pace)}/mi, "
@@ -919,32 +931,48 @@ def main():
         out = []
         for i, lap in enumerate(laps, start=1):
             lap_dist_m = lap.get("distance")
+            lap_dist_mi = m_to_mi(lap_dist_m) if lap_dist_m is not None else None
             out.append({
                 "mile": i,
+                "distMi": round(lap_dist_mi, 2) if lap_dist_mi is not None else None,
                 "pace": pace_min_per_mile(lap_dist_m, lap.get("duration")) or 0,
                 "avgHr": lap.get("averageHR"),
                 "maxHr": lap.get("maxHR"),
                 "elevGainFt": round(m_to_ft(lap.get("elevationGain"))) if lap.get("elevationGain") is not None else 0,
                 "cadence": lap.get("averageRunningCadenceInStepsPerMinute"),
-                "_lapDistMi": m_to_mi(lap_dist_m) if lap_dist_m is not None else None,
             })
-        # Garmin auto-laps at each full mile, so the trailing lap is usually
-        # whatever distance was left when the run ended — not a completed mile.
-        # Charting or tabling it as "Mile N" both mislabels an incomplete mile as
-        # finished and (since a very short lap's pace is extremely noisy — a few
-        # seconds of GPS wobble over 0.02mi can compute as a 24:00/mi "mile")
-        # distorts the pace/HR scale for every real mile alongside it. Trailing
-        # laps under 0.9mi are dropped, as long as at least one full lap remains.
-        while len(out) > 1 and out[-1]["_lapDistMi"] is not None and out[-1]["_lapDistMi"] < 0.9:
-            out.pop()
-        for s in out:
-            s.pop("_lapDistMi", None)
-        return out
+        # Garmin only auto-laps at each full mile on runs where mile-autolap was
+        # the active lap trigger. A structured workout (interval reps, tempo
+        # segments) instead gets one lap per interval/recovery segment — usually
+        # well under a mile, and wildly different from each other — and treating
+        # those as "Mile 1, Mile 2, ..." mislabels a 400-800m rep as a finished
+        # mile and badly distorts the pace/HR scale plotted next to it. Rather
+        # than trust the run's Tempo/Speed/Long-Run label (which is itself a
+        # name-based guess), this looks at the lap DISTANCES actually returned:
+        # if most of them cluster near 1.00mi, it's real per-mile autolaps;
+        # otherwise it's a structured workout and gets labeled "Lap N" (with its
+        # real distance shown) instead of a misleading "Mile N".
+        checkable = [s["distMi"] for s in out[:-1] if s["distMi"] is not None] if len(out) > 1 else []
+        if not checkable:
+            checkable = [s["distMi"] for s in out if s["distMi"] is not None]
+        mile_based = bool(checkable) and (sum(1 for d in checkable if 0.85 <= d <= 1.15) / len(checkable)) >= 0.6
+
+        if mile_based:
+            # The trailing lap is usually whatever partial distance was left when
+            # the run ended, not a finished mile (see note above) — a few seconds
+            # of GPS wobble over 0.02mi can compute as a 24:00/mi "mile" that
+            # skews the whole chart's scale. Drop it, down to 1 lap minimum.
+            while len(out) > 1 and out[-1]["distMi"] is not None and out[-1]["distMi"] < 0.9:
+                out.pop()
+        # For a structured workout, every lap (work rep AND recovery jog) is real,
+        # correctly-accounted-for distance — nothing here is a "leftover partial
+        # mile," so nothing gets dropped; it's just labeled and charted as laps.
+        return out, mile_based
 
     detail_candidates = runs_desc[:DETAIL_RUN_COUNT]
     run_details = {}
     for i, r in enumerate(detail_candidates):
-        splits = build_splits(r["id"])
+        splits, mile_based = build_splits(r["id"])
         route = None
         elev_profile = None
         if i < ROUTE_RUN_COUNT:
@@ -952,7 +980,7 @@ def main():
             route = parse_route(details_raw)
             elev_profile = parse_elevation_profile(details_raw)
         if splits or route:
-            run_details[str(r["id"])] = {"splits": splits, "route": route, "elevProfile": elev_profile}
+            run_details[str(r["id"])] = {"splits": splits, "route": route, "elevProfile": elev_profile, "mileBased": mile_based}
 
     # ---- Long run splits panel (mile-by-mile, for the N most recent long runs) —
     # reuses the detail fetch above when the long run falls inside that window.
@@ -962,11 +990,12 @@ def main():
     for r in long_run_candidates:
         rid = str(r["id"])
         cached = run_details.get(rid)
-        splits = cached["splits"] if cached else build_splits(r["id"])
+        splits, mile_based = (cached["splits"], cached["mileBased"]) if cached else build_splits(r["id"])
         if splits:
             long_runs_data[rid] = {
                 "label": f"{r['dateLabel']} — {r['name']} ({r['distMi']:.1f}mi)",
                 "splits": splits,
+                "mileBased": mile_based,
                 "elevProfile": cached.get("elevProfile") if cached else None,
             }
             long_runs_ordered.append((r, splits))
@@ -1061,6 +1090,7 @@ def main():
             "syncRangeStart": start_history.isoformat(),
             "syncRangeEnd": today.isoformat(),
             "detailRunCount": DETAIL_RUN_COUNT,
+            "cartoApiKey": CARTO_API_KEY,
         },
         "recommendation": recommendation,
         "runs": [{k: v for k, v in r.items() if k not in ("distance_m", "duration_s")} for r in runs_desc],
@@ -1504,8 +1534,10 @@ footer .update-note b{ color:var(--text-muted); }
 .route-map{ height:280px; border-radius:10px; overflow:hidden; border:1px solid var(--border-soft); background:var(--bg-inset); }
 .route-map .empty{ padding:16px; }
 /* Recolor the stock OSM tiles to sit inside the dark console instead of
-   dropping a bright white rectangle into the page. */
-.route-map .leaflet-tile-pane{ filter:invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7); }
+   dropping a bright white rectangle into the page. Only applied to the plain-
+   OSM fallback (no CARTO key configured) — CARTO Voyager is already a light,
+   considered basemap and doesn't need forcing into the dark theme. */
+.route-map.osm-fallback .leaflet-tile-pane{ filter:invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7); }
 .route-map .leaflet-control-zoom a{ background:var(--bg-raised); color:var(--text); border-color:var(--border) !important; }
 .route-map .leaflet-control-zoom a:hover{ background:var(--bg-panel); }
 .route-map .leaflet-control-attribution{ background:rgba(13,16,19,0.72); color:var(--text-dim); }
@@ -1866,19 +1898,41 @@ function renderSeriesChart(containerId, series, valueKey, color){
   container.appendChild(svg);
 }
 
-function renderSplitsChart(containerId, splits, legendId, elevProfile){
+function renderSplitsChart(containerId, splits, legendId, elevProfile, mileBased){
+  if(mileBased===undefined) mileBased=true; // older cached data with no flag — assume the common case
   const container=document.getElementById(containerId); container.innerHTML='';
   if(!splits.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; if(legendId){ const lg=document.getElementById(legendId); if(lg) lg.innerHTML=''; } return; }
   const {w:W,h:H}=chartSize(container,720,320), M={top:28,right:20,bottom:34,left:50};
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
   const n=splits.length;
-  // distScale takes a continuous mile-of-run value (not just a split index), so the
-  // granular altitude trace below can plot sub-mile samples on the same axis pace/HR
-  // use — xCenter(i) is just distScale at the middle of mile i, unchanged from before.
-  const distScale=d=>M.left+(d/n)*plotW;
-  const xCenter=i=>distScale(i+0.5);
-  const mileLabels=labelIndices(n, plotW, widestLabelPx(splits.map(s=>'Mi '+s.mile)));
+  const labelWord = mileBased ? 'Mile' : 'Lap';
+  // Each split's REAL distance (falling back to 1mi/lap if Garmin didn't return
+  // one) rather than assuming every lap is exactly one mile wide. That fallback
+  // assumption used to be baked into distScale itself — harmless for real
+  // per-mile autolaps (each lap really is ~1mi), but for a structured workout
+  // (interval reps + recovery jogs of very different lengths) it drew every lap
+  // as an equal-width "mile," which is exactly what mislabeled a 400m rep as a
+  // finished mile. distScale/xCenter now work off actual cumulative distance,
+  // so a short rep gets a proportionally narrow slice and a long recovery jog
+  // gets a proportionally wide one — correct either way, not just for miles.
+  const lapDist = splits.map(s=>(s.distMi!=null && s.distMi>0) ? s.distMi : 1);
+  const cum=[0]; lapDist.forEach(d=>cum.push(cum[cum.length-1]+d));
+  const totalDist = cum[n] || n;
+  const distScale=d=>M.left+(Math.min(Math.max(d,0),totalDist)/totalDist)*plotW;
+  const xCenter=i=>distScale((cum[i]+cum[i+1])/2);
+  // Label spacing measured off each split's REAL x position (not an assumed
+  // even index-spacing) since splits are no longer necessarily equal-width —
+  // a run with several short, tightly-clustered reps needs fewer visible
+  // labels than its raw split count would suggest under an even-spacing guess.
+  const splitLabelMinGap = widestLabelPx(splits.map(s=>labelWord.slice(0,mileBased?2:3)+' '+s.mile));
+  const labelIdx=[]; let lastLabelX=-Infinity;
+  for(let i=0;i<n;i++){ const x=xCenter(i); if(x-lastLabelX>=splitLabelMinGap){ labelIdx.push(i); lastLabelX=x; } }
+  if(labelIdx[labelIdx.length-1]!==n-1){
+    const lastX=xCenter(n-1);
+    if(lastX-lastLabelX>=splitLabelMinGap) labelIdx.push(n-1); else labelIdx[labelIdx.length-1]=n-1;
+  }
+  const mileLabels=new Set(labelIdx);
   const paces=splits.map(s=>s.pace).filter(p=>p>0);
   const paceMin=Math.min(...paces)-0.4, paceMax=Math.max(...paces)+0.4;
   const paceTop=M.top, paceBottom=M.top+plotH;
@@ -1903,7 +1957,7 @@ function renderSplitsChart(containerId, splits, legendId, elevProfile){
   if(hasProfile){
     const alts=elevProfile.map(p=>p.elevFt);
     const altMin=Math.min(...alts), altMax=Math.max(...alts), range=(altMax-altMin)||1;
-    elevPts = elevProfile.map(p=>[distScale(Math.min(Math.max(p.distMi,0),n)), baseline-((p.elevFt-altMin)/range)*elevCapPx]);
+    elevPts = elevProfile.map(p=>[distScale(p.distMi), baseline-((p.elevFt-altMin)/range)*elevCapPx]);
   } else {
     const maxGain=Math.max(...splits.map(s=>s.elevGainFt||0),1);
     elevPts = splits.map((s,i)=>[xCenter(i), baseline-((s.elevGainFt||0)/maxGain)*elevCapPx]);
@@ -1913,23 +1967,26 @@ function renderSplitsChart(containerId, splits, legendId, elevProfile){
   svg.appendChild(el('path',{d:elevArea, fill:elevColor+'2e', stroke:'none'}));
   svg.appendChild(el('path',{d:elevLine, fill:'none', stroke:elevColor, 'stroke-width':hasProfile?1.3:1.5, 'stroke-linejoin':'round'}));
 
-  // One hover target + one x-axis label per mile regardless of which elevation
-  // resolution is showing — the tooltip always reports that mile's actual gain.
+  // One hover target + one x-axis label per split regardless of which elevation
+  // resolution is showing — the tooltip always reports that split's actual gain.
+  // Each split's tooltip title includes its real distance for a "Lap" (not a
+  // "Mile") since "Lap 3" alone doesn't tell you it was a 0.52mi rep.
+  const splitTitle = s => mileBased ? `${labelWord} ${s.mile}` : `${labelWord} ${s.mile}${s.distMi!=null?` · ${s.distMi.toFixed(2)}mi`:''}`;
   splits.forEach((s,i)=>{
-    const x0=distScale(i), x1=distScale(i+1);
+    const x0=distScale(cum[i]), x1=distScale(cum[i+1]);
     const hit=el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,1),height:plotH,fill:'transparent'});
-    hit.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Mile ${s.mile}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`));
+    hit.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`));
     hit.addEventListener('mousemove',positionTooltip); hit.addEventListener('mouseleave',hideTooltip);
     svg.appendChild(hit);
-    if(mileLabels.has(i)){ const xl=el('text',{x:xCenter(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent='Mi '+s.mile; svg.appendChild(xl); }
+    if(mileLabels.has(i)){ const xl=el('text',{x:xCenter(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=(mileBased?'Mi ':'Lap ')+s.mile; svg.appendChild(xl); }
   });
   let pacePath=''; splits.forEach((s,i)=>{ pacePath+=(i===0?'M':'L')+xCenter(i)+','+yPace(s.pace)+' '; });
   svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2.5}));
-  splits.forEach((s,i)=>{ const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yPace(s.pace),r:4.5,fill:'#e3a857'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Mile ${s.mile}</div><div class="tt-row">Pace: <b>${paceStr(s.pace)}/mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  splits.forEach((s,i)=>{ const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yPace(s.pace),r:4.5,fill:'#e3a857'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Pace: <b>${paceStr(s.pace)}/mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   if(hrs.length){
     let hrPath=''; splits.forEach((s,i)=>{ hrPath+=(i===0?'M':'L')+xCenter(i)+','+yHr(s.avgHr||hrMin)+' '; });
     svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#c1614a','stroke-width':2.5}));
-    splits.forEach((s,i)=>{ if(!s.avgHr) return; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yHr(s.avgHr),r:4.5,fill:'#c1614a'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Mile ${s.mile}</div><div class="tt-row">Avg HR: <b>${s.avgHr} bpm</b></div>${s.maxHr?`<div class="tt-row">Max HR: <b>${s.maxHr} bpm</b></div>`:''}`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+    splits.forEach((s,i)=>{ if(!s.avgHr) return; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yHr(s.avgHr),r:4.5,fill:'#c1614a'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Avg HR: <b>${s.avgHr} bpm</b></div>${s.maxHr?`<div class="tt-row">Max HR: <b>${s.maxHr} bpm</b></div>`:''}`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   }
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
@@ -1958,10 +2015,25 @@ function renderRouteMap(containerId, points){
   container.innerHTML='';
   const latlngs=points.map(p=>[p[0],p[1]]);
   const map=L.map(container,{scrollWheelZoom:false});
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    maxZoom:19,
-    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
-  }).addTo(map);
+  // CARTO Voyager (a Google Maps–style basemap) when a key is configured; plain
+  // OSM tiles otherwise, so the map still works out of the box before anyone
+  // sets one up. The dark-console recolor filter below was built to force OSM's
+  // stark white default into this theme — Voyager is already a considered,
+  // muted light basemap, so it renders as-is and the filter only applies to
+  // the OSM fallback (see the CSS: .route-map.osm-fallback).
+  const cartoKey = DATA.meta.cartoApiKey;
+  container.classList.toggle('osm-fallback', !cartoKey);
+  if(cartoKey){
+    L.tileLayer(`https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${cartoKey}`,{
+      maxZoom:20,
+      attribution:'&copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+    }).addTo(map);
+  } else {
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+      maxZoom:19,
+      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+    }).addTo(map);
+  }
   const line=L.polyline(latlngs,{color:'#e3a857',weight:4,opacity:0.95,lineJoin:'round',lineCap:'round'}).addTo(map);
   L.circleMarker(latlngs[0],{radius:6,color:'#12151a',weight:2,fillColor:'#5fa8a0',fillOpacity:1}).addTo(map).bindTooltip('Start');
   L.circleMarker(latlngs[latlngs.length-1],{radius:6,color:'#12151a',weight:2,fillColor:'#c1614a',fillOpacity:1}).addTo(map).bindTooltip('Finish');
@@ -1980,7 +2052,7 @@ function redrawCharts(){
   safe('redraw hrv', ()=>registerChart('chart-hrv', 'HRV Trend', renderSeriesChart, DATA.hrv, 'hrv', '#5fa8a0'));
   safe('redraw vo2', ()=>registerChart('chart-vo2', 'VO2 Max Trend', renderSeriesChart, DATA.vo2max, 'vo2', '#e3a857'));
   safe('redraw efficiency', ()=>registerChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', renderSeriesChart, DATA.efficiencyTrend, 'ef', '#5fa8a0'));
-  safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]){ const lr=DATA.longRuns[ACTIVE_SPLIT_ID]; registerChart('chart-splits', `Long Run Splits — ${lr.label}`, renderSplitsChart, lr.splits, 'splits-legend', lr.elevProfile); } });
+  safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]){ const lr=DATA.longRuns[ACTIVE_SPLIT_ID]; registerChart('chart-splits', `Long Run Splits — ${lr.label}`, renderSplitsChart, lr.splits, 'splits-legend', lr.elevProfile, lr.mileBased); } });
   Object.values(ROUTE_MAP_INSTANCES).forEach(m=>{ try{ m.invalidateSize(); }catch(e){} });
   if(ZOOM.chartId && CHART_REGISTRY[ZOOM.chartId] && document.getElementById('chart-zoom-modal').style.display!=='none'){
     resetZoom();
@@ -2146,7 +2218,7 @@ safe('long run splits', function(){
       <div class="split-meta-item"><div class="stat-label">Elev Gain</div><div class="val">${totalGain} ft</div></div>
       <div class="split-meta-item"><div class="stat-label">Fastest / Slowest Mile</div><div class="val">${fastest?paceStr(fastest.pace):'—'} → ${slowest?paceStr(slowest.pace):'—'}</div></div>
     `;
-    registerChart('chart-splits', `Long Run Splits — ${lr.label}`, renderSplitsChart, lr.splits, 'splits-legend', lr.elevProfile);
+    registerChart('chart-splits', `Long Run Splits — ${lr.label}`, renderSplitsChart, lr.splits, 'splits-legend', lr.elevProfile, lr.mileBased);
   }
   document.getElementById('split-tabs').innerHTML = ids.map(id=>`<button class="tab-btn" data-id="${id}">${longRuns[id].label}</button>`).join('');
   document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>renderSplit(b.dataset.id)));
@@ -2206,6 +2278,12 @@ safe('run detail modal', function(){
     const route = detail.route || null;
     const elevProfile = detail.elevProfile || null;
     const cap = DATA.meta.detailRunCount;
+    // Tempo/interval workouts get one lap per rep+recovery segment, not one per
+    // mile — build_splits() figures out which kind of run this is from the lap
+    // data itself, so the modal just reads that flag rather than guessing again.
+    const mileBased = detail.mileBased !== false;
+    const splitsSectionTitle = mileBased ? 'Mile Splits' : 'Lap Splits';
+    const splitsFirstCol = mileBased ? 'Mile' : 'Lap';
 
     const stat = (label, value, unit) => `<div class="modal-stat"><div class="stat-label">${label}</div><div class="stat-value">${value}${unit?`<span class="stat-unit">${unit}</span>`:''}</div></div>`;
     let html = `
@@ -2222,12 +2300,12 @@ safe('run detail modal', function(){
       </div>
       <div class="modal-section-title">Route</div>
       ${route && route.length>1 ? `<div class="route-map" id="modal-route"></div><div class="route-legend"><span><span style="color:#5fa8a0;">●</span> Start</span><span><span style="color:#c1614a;">●</span> Finish</span></div>` : `<p class="empty">No GPS route available for this run.</p>`}
-      <div class="modal-section-title">Mile Splits</div>
+      <div class="modal-section-title">${splitsSectionTitle}</div>
       ${splits.length ? `
         <div class="chart-box" style="height:220px;"><div id="modal-splits-chart" class="svg-chart"></div></div>
         <div class="legend-row" id="modal-splits-legend"></div>
-        <div class="table-scroll" style="margin-top:12px;"><table class="modal-splits-table"><thead><tr><th>Mile</th><th>Pace</th><th>Avg HR</th><th>Cadence</th><th>Elev+</th></tr></thead><tbody>
-        ${splits.map(s=>`<tr><td>${s.mile}</td><td>${paceStr(s.pace)}/mi</td><td>${s.avgHr??'—'}</td><td>${s.cadence?Math.round(s.cadence):'—'}</td><td>+${s.elevGainFt||0}ft</td></tr>`).join('')}
+        <div class="table-scroll" style="margin-top:12px;"><table class="modal-splits-table"><thead><tr><th>${splitsFirstCol}</th><th>Pace</th><th>Avg HR</th><th>Cadence</th><th>Elev+</th></tr></thead><tbody>
+        ${splits.map(s=>`<tr><td>${mileBased?s.mile:(s.mile+(s.distMi!=null?` · ${s.distMi.toFixed(2)}mi`:''))}</td><td>${paceStr(s.pace)}/mi</td><td>${s.avgHr??'—'}</td><td>${s.cadence?Math.round(s.cadence):'—'}</td><td>+${s.elevGainFt||0}ft</td></tr>`).join('')}
         </tbody></table></div>`
         : `<p class="empty">Lap-by-lap detail isn't available for this run${cap?` (kept for the most recent ${cap} runs only, to keep the daily sync reasonably fast).`:'.'}</p>`}
     `;
@@ -2235,7 +2313,7 @@ safe('run detail modal', function(){
     modal.style.display='flex';
     document.body.style.overflow='hidden';
     if(route && route.length>1) renderRouteMap('modal-route', route);
-    if(splits.length) registerChart('modal-splits-chart', `Mile Splits — ${run.name}`, renderSplitsChart, splits, 'modal-splits-legend', elevProfile);
+    if(splits.length) registerChart('modal-splits-chart', `${splitsSectionTitle} — ${run.name}`, renderSplitsChart, splits, 'modal-splits-legend', elevProfile, mileBased);
     attachChartExpandButtons(body);
   };
 });

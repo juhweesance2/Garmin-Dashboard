@@ -15,10 +15,84 @@ HRV_SAMPLE_STEP = 3         # sample every N days (keeps API calls reasonable)
 VO2_TREND_DAYS = 120
 
 RACE_DATE = date(2026, 11, 8)
-RACE_NAME = "Half Marathon"
+RACE_NAME = "Monterey Bay Half Marathon"
+GOAL_TIME_SEC = 2 * 3600 + 14 * 60        # sub-2:14 PR goal
+GOAL_PACE_MIN_MI = 10 + 5 / 60             # 10:05/mi — the "(goal pace)" workouts converge on this
+PRIOR_PR_SEC = 2 * 3600 + 18 * 60 + 46     # 2:18:46 — prior PR, for reference only
 
 MI_PER_M = 1 / 1609.344
 FT_PER_M = 3.28084
+
+# =====================================================================
+# Training plan — encoded from the 3-day/week Monterey Bay Half plan
+# (intervals Mon / tempo Wed / long run Sat; strength+cross-training on the
+# other days aren't tracked here since Garmin only gets pulled for "running"
+# activities — see the setup guide for why that's a deliberate scope cut).
+#
+# targetMi per running day is a close ESTIMATE built from the plan's written
+# workout structure (warmup + main set + between-rep recovery jog, converted
+# to miles and rounded to the nearest 0.25mi) — not a value Garmin or the plan
+# states directly as a single number, except for the long run, which the plan
+# always gives as a plain mileage figure. Treat targetMi as a target band, not
+# a number your actual GPS distance needs to match exactly — real runs never
+# match a prescribed workout down to the hundredth of a mile anyway.
+# =====================================================================
+PLAN_START = date(2026, 8, 10)  # Monday of Week 1
+
+TRAINING_PLAN = [
+    {"phase": "Build Tolerance", "longRunTargetMi": 6.0, "weeklyTargetMi": 14.25, "sessions": {
+        "mon": {"type": "Intervals", "label": "5×400m @ 8:40/mi", "targetMi": 4.25},
+        "wed": {"type": "Tempo", "label": "2mi @ 10:50/mi", "targetMi": 4.0},
+        "sat": {"type": "Long Run", "label": "6mi easy", "targetMi": 6.0}}},
+    {"phase": "Build Tolerance", "longRunTargetMi": 6.5, "weeklyTargetMi": 11.0, "sessions": {
+        "mon": {"type": "Rest", "label": "Optional 2-3mi shakeout (travel)", "targetMi": 0},
+        "wed": {"type": "Tempo", "label": "2.5mi @ 10:40/mi", "targetMi": 4.5},
+        "sat": {"type": "Long Run", "label": "6.5mi easy", "targetMi": 6.5}}},
+    {"phase": "Build Tolerance", "longRunTargetMi": 9.0, "weeklyTargetMi": 19.5, "sessions": {
+        "mon": {"type": "Intervals", "label": "5×800m @ 9:04/mi", "targetMi": 5.5},
+        "wed": {"type": "Tempo", "label": "3mi @ 10:35/mi", "targetMi": 5.0},
+        "sat": {"type": "Long Run", "label": "9mi, last 1mi @ 10:45/mi", "targetMi": 9.0}}},
+    {"phase": "Build Tolerance", "longRunTargetMi": 10.0, "weeklyTargetMi": 21.0, "sessions": {
+        "mon": {"type": "Intervals", "label": "5×800m @ 8:54/mi", "targetMi": 5.5},
+        "wed": {"type": "Tempo", "label": "3.5mi @ 10:30/mi", "targetMi": 5.5},
+        "sat": {"type": "Long Run", "label": "10mi, last 2mi @ 10:45/mi", "targetMi": 10.0}}},
+    {"phase": "Recovery", "longRunTargetMi": 7.5, "weeklyTargetMi": 14.5, "sessions": {
+        "mon": {"type": "Intervals", "label": "4×400m @ 8:40/mi (reduced)", "targetMi": 3.0},
+        "wed": {"type": "Tempo", "label": "2mi @ 10:40/mi (reduced)", "targetMi": 4.0},
+        "sat": {"type": "Long Run", "label": "7.5mi easy, down week", "targetMi": 7.5}}},
+    {"phase": "Sharpen", "longRunTargetMi": 11.0, "weeklyTargetMi": 22.5, "sessions": {
+        "mon": {"type": "Intervals", "label": "4×1000m @ 8:48/mi", "targetMi": 5.5},
+        "wed": {"type": "Tempo", "label": "4mi @ 10:20/mi", "targetMi": 6.0},
+        "sat": {"type": "Long Run", "label": "11mi, last 2mi @ 10:35/mi", "targetMi": 11.0}}},
+    {"phase": "Sharpen", "longRunTargetMi": 12.0, "weeklyTargetMi": 25.5, "sessions": {
+        "mon": {"type": "Intervals", "label": "4×1mi @ 9:40/mi", "targetMi": 7.0},
+        "wed": {"type": "Tempo", "label": "4.5mi @ 10:10/mi", "targetMi": 6.5},
+        "sat": {"type": "Long Run", "label": "12mi, last 3mi @ 10:25/mi", "targetMi": 12.0}}},
+    {"phase": "Sharpen", "longRunTargetMi": 13.0, "weeklyTargetMi": 27.5, "sessions": {
+        "mon": {"type": "Intervals", "label": "3×1.5mi @ 9:45/mi", "targetMi": 7.5},
+        "wed": {"type": "Tempo", "label": "5mi @ 10:05/mi", "targetMi": 7.0},
+        "sat": {"type": "Long Run", "label": "13mi, last 3mi @ 10:20/mi", "targetMi": 13.0}}},
+    {"phase": "Peak", "longRunTargetMi": 14.0, "weeklyTargetMi": 27.75, "sessions": {
+        "mon": {"type": "Intervals", "label": "2×2mi @ 10:00/mi (goal pace)", "targetMi": 6.75},
+        "wed": {"type": "Tempo", "label": "5mi @ 10:05/mi (goal pace)", "targetMi": 7.0},
+        "sat": {"type": "Long Run", "label": "14mi, last 4mi @ goal pace — key checkpoint", "targetMi": 14.0}}},
+    {"phase": "Taper", "longRunTargetMi": 10.0, "weeklyTargetMi": 21.75, "sessions": {
+        "mon": {"type": "Intervals", "label": "3×1mi @ 9:45/mi", "targetMi": 5.75},
+        "wed": {"type": "Tempo", "label": "4mi @ 10:10/mi", "targetMi": 6.0},
+        "sat": {"type": "Long Run", "label": "10mi, last 2mi @ goal pace", "targetMi": 10.0}}},
+    {"phase": "Taper", "longRunTargetMi": 7.0, "weeklyTargetMi": 15.0, "sessions": {
+        "mon": {"type": "Intervals", "label": "4×400m @ 8:00/mi fast (sharpeners)", "targetMi": 3.0},
+        "wed": {"type": "Tempo", "label": "3mi @ 10:10/mi (short)", "targetMi": 5.0},
+        "sat": {"type": "Long Run", "label": "7mi easy (reduced)", "targetMi": 7.0}}},
+    {"phase": "Taper", "longRunTargetMi": 5.0, "weeklyTargetMi": 11.75, "sessions": {
+        "mon": {"type": "Easy", "label": "4×300m strides (sharpeners)", "targetMi": 2.75},
+        "wed": {"type": "Tempo", "label": "2mi @ 10:15/mi (short)", "targetMi": 4.0},
+        "sat": {"type": "Easy", "label": "5mi easy — shakeout", "targetMi": 5.0}}},
+    {"phase": "Race Week", "longRunTargetMi": 1.5, "weeklyTargetMi": 6.75, "sessions": {
+        "mon": {"type": "Easy", "label": "3mi easy", "targetMi": 3.0},
+        "wed": {"type": "Easy", "label": "2mi easy + strides", "targetMi": 2.25},
+        "sat": {"type": "Easy", "label": "1-2mi shakeout + strides", "targetMi": 1.5}}},
+]
 
 # =====================================================================
 # Unit helpers
@@ -195,6 +269,83 @@ def build_load_mix(runs_asc, today, window_days=28):
         "easyPct": round(mins["easy"] / total * 100), "moderatePct": round(mins["moderate"] / total * 100),
         "hardPct": round(mins["hard"] / total * 100),
     }
+
+# =====================================================================
+# Plan vs. actual — compares TRAINING_PLAN (above) against what Garmin
+# actually recorded, week by week. Scoped to running days only (Mon/Wed/Sat
+# in this plan) since that's all the script fetches from Garmin.
+# =====================================================================
+def build_plan_comparison(runs_asc, today):
+    out = []
+    for i, wk in enumerate(TRAINING_PLAN):
+        week_start = PLAN_START + timedelta(weeks=i)
+        week_end = week_start + timedelta(days=6)
+        is_future = week_start > today
+        week_runs = [r for r in runs_asc if week_start <= r["date"] <= week_end]
+        actual_mi = round(sum(r["distMi"] for r in week_runs), 1) if (week_runs or not is_future) else None
+        actual_long = round(max((r["distMi"] for r in week_runs), default=0.0), 1) if (week_runs or not is_future) else None
+
+        sessions_out = {}
+        for day_key, offset in (("mon", 0), ("wed", 2), ("sat", 5)):
+            planned = wk["sessions"].get(day_key)
+            if not planned:
+                continue
+            target_date = week_start + timedelta(days=offset)
+            match = None
+            if not is_future:
+                # nearest actual run within a day of the planned date — real
+                # schedules slip by a day without it meaning the session was skipped
+                candidates = [r for r in runs_asc if abs((r["date"] - target_date).days) <= 1]
+                if candidates:
+                    match = min(candidates, key=lambda r: abs((r["date"] - target_date).days))
+            sessions_out[day_key] = {
+                "type": planned["type"], "label": planned["label"], "targetMi": planned["targetMi"],
+                "date": target_date.isoformat(),
+                "actualMi": round(match["distMi"], 2) if match else None,
+                "actualPace": match["paceMinMi"] if match else None,
+                "matched": bool(match),
+            }
+
+        weekly_target = wk["weeklyTargetMi"]
+        adherence_pct = round(actual_mi / weekly_target * 100) if (actual_mi is not None and weekly_target) else None
+        if is_future:
+            status = "upcoming"
+        elif adherence_pct is None:
+            status = "no-data"
+        elif adherence_pct >= 85:
+            status = "on-track"
+        elif adherence_pct >= 60:
+            status = "behind"
+        else:
+            status = "well-behind"
+
+        out.append({
+            "weekStart": week_start.isoformat(), "weekLabel": week_start.strftime("%b %-d"),
+            "phase": wk["phase"], "plannedMi": weekly_target, "actualMi": actual_mi,
+            "adherencePct": adherence_pct, "plannedLongRun": wk["longRunTargetMi"], "actualLongRun": actual_long,
+            "status": status, "sessions": sessions_out,
+        })
+    return out
+
+# =====================================================================
+# Aerobic efficiency trend — speed-per-heartbeat on easy-effort runs (Easy Run
+# + Long Run types only, so quality days don't distort it). Rising over time
+# means you're covering more ground per heartbeat at the same easy effort —
+# a genuine aerobic-fitness signal computed entirely from your own logged
+# data, independent of Garmin's VO2 max estimate or a guessed field name.
+# =====================================================================
+def build_efficiency_trend(runs_asc):
+    out = []
+    for r in runs_asc:
+        if r["type"] not in ("Easy Run", "Long Run"):
+            continue
+        if not r["paceMinMi"] or not r["avgHr"] or r["distMi"] < 1.5:
+            continue
+        mph = 60 / r["paceMinMi"]
+        ef = round(mph / r["avgHr"] * 1000, 2)  # arbitrary but consistent scale — only the trend matters
+        out.append({"date": r["date"].isoformat(), "ef": ef, "distMi": r["distMi"], "avgHr": r["avgHr"]})
+    out.sort(key=lambda p: p["date"])
+    return out
 
 # =====================================================================
 # Race countdown + daily recommendation
@@ -554,12 +705,49 @@ def insight_readiness_flag(readiness, hrv_today, sleep_hours):
     return {"type": "flag", "icon": "READINESS",
             "html": f"Today's training readiness came in at <b>{readiness.get('score', '—')}/100 ({lvl.title()})</b>, driven largely by {driver}. Worth prioritizing recovery before the next hard session."}
 
-def build_insights(weeks, long_runs_ordered, runs_asc, long_run_splits_by_id, today, load_mix, vo2_series, hrv_series, acwr, readiness, hrv_today):
+def insight_efficiency(ef_series):
+    if len(ef_series) < 8:
+        return None
+    early = ef_series[:len(ef_series) // 3] or ef_series[:1]
+    recent = ef_series[-len(ef_series) // 3:] or ef_series[-1:]
+    early_avg = sum(p["ef"] for p in early) / len(early)
+    recent_avg = sum(p["ef"] for p in recent) / len(recent)
+    if early_avg <= 0:
+        return None
+    pct = (recent_avg - early_avg) / early_avg * 100
+    if abs(pct) < 3:
+        return {"type": "watch", "icon": "EFFICIENCY",
+                "html": f"Aerobic efficiency on easy/long runs has held roughly flat across this window ({early_avg:.2f} → {recent_avg:.2f}) — normal if you've mostly been holding steady mileage; this is usually one of the first numbers to move once a build phase adds consistent easy volume."}
+    if pct > 0:
+        return {"type": "good", "icon": "EFFICIENCY",
+                "html": f"Aerobic efficiency on easy/long runs is up <b>{pct:.0f}%</b> across this window (speed per heartbeat, {early_avg:.2f} → {recent_avg:.2f}) — you're covering more ground at the same easy effort, a genuine aerobic-fitness gain independent of any single fast workout."}
+    return {"type": "watch", "icon": "EFFICIENCY",
+            "html": f"Aerobic efficiency on easy/long runs is down <b>{abs(pct):.0f}%</b> across this window (speed per heartbeat, {early_avg:.2f} → {recent_avg:.2f}) — worth a look alongside heat, fatigue, or a recent volume jump before assuming fitness is regressing."}
+
+def insight_plan_adherence(plan_comparison, today):
+    completed = [w for w in plan_comparison if w["status"] not in ("upcoming", "no-data")]
+    if not completed:
+        return None
+    last_two = completed[-2:]
+    behind = [w for w in last_two if w["status"] in ("behind", "well-behind")]
+    if len(behind) == len(last_two) and len(last_two) >= 1:
+        worst = min(last_two, key=lambda w: w["adherencePct"] or 0)
+        return {"type": "flag", "icon": "PLAN",
+                "html": f"The last {len(last_two)} week(s) have run under your plan's target mileage — week of {worst['weekLabel']} hit {worst['adherencePct']}% of its {worst['plannedMi']:.1f}mi target. One light week is normal; two in a row is worth a deliberate call on whether to make it up or adjust the plan rather than letting it drift."}
+    last = completed[-1]
+    if last["status"] == "on-track":
+        return {"type": "good", "icon": "PLAN",
+                "html": f"Week of {last['weekLabel']} ({last['phase']}) hit {last['adherencePct']}% of its planned {last['plannedMi']:.1f}mi, with a {last['actualLongRun']:.1f}mi long run against a {last['plannedLongRun']:.1f}mi target — on track with the plan."}
+    return None
+
+def build_insights(weeks, long_runs_ordered, runs_asc, long_run_splits_by_id, today, load_mix, vo2_series, hrv_series, acwr, readiness, hrv_today, ef_series, plan_comparison):
     generators = [
+        lambda: insight_plan_adherence(plan_comparison, today),
         lambda: insight_volume_trend(weeks),
         lambda: insight_bonk(long_runs_ordered),
         lambda: insight_terrain(runs_asc, long_run_splits_by_id, today),
         lambda: insight_load_mix(load_mix),
+        lambda: insight_efficiency(ef_series),
         lambda: insight_vo2(vo2_series),
         lambda: insight_hrv(hrv_series),
         lambda: insight_acwr(acwr),
@@ -719,10 +907,15 @@ def main():
         resting_hr_today, rhr_baseline, sleep_hours, phase, days_left
     )
 
+    # ---- Plan vs. actual + aerobic efficiency trend ----
+    plan_comparison = build_plan_comparison(runs_asc, today)
+    efficiency_trend = build_efficiency_trend(runs_asc)
+
     # ---- Coach-voice insights ----
     insights = build_insights(
         weeks, long_runs_ordered, runs_asc, long_runs_data, today,
-        load_mix, vo2_series, hrv_series, acwr, readiness, hrv_today
+        load_mix, vo2_series, hrv_series, acwr, readiness, hrv_today,
+        efficiency_trend, plan_comparison
     )
 
     data = {
@@ -742,6 +935,8 @@ def main():
         "weekly": weeks,
         "longRuns": long_runs_data,
         "runDetails": run_details,
+        "planComparison": plan_comparison,
+        "efficiencyTrend": efficiency_trend,
         "vo2max": vo2_series,
         "vo2maxToday": vo2max_today,
         "hrv": hrv_series,
@@ -836,7 +1031,33 @@ HTML_SHELL = r"""<!DOCTYPE html>
 
   <section>
     <div class="section-head">
-      <div class="section-title"><span class="section-index">03</span> What The Data Is Saying</div>
+      <div class="section-title"><span class="section-index">03</span> Plan vs. Actual</div>
+      <div class="section-note" id="plan-note">Weekly mileage against your training plan.</div>
+    </div>
+    <div class="panel">
+      <div class="chart-box tall"><div id="chart-plan" class="svg-chart"></div></div>
+      <div class="legend-row">
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--text-dim)"></span>Planned miles</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--amber)"></span>Actual miles</div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px;">
+      <div class="table-scroll">
+        <table id="plan-table">
+          <thead>
+            <tr>
+              <th>Week</th><th>Phase</th><th>Planned</th><th>Actual</th><th>Adherence</th><th>Long run — plan → actual</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="plan-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div class="section-title"><span class="section-index">04</span> What The Data Is Saying</div>
       <div class="section-note">Rule-based pattern detection — not a live model call — so it runs free on every sync.</div>
     </div>
     <div id="insights" style="display:flex; flex-direction:column; gap:10px;"></div>
@@ -844,7 +1065,7 @@ HTML_SHELL = r"""<!DOCTYPE html>
 
   <section>
     <div class="section-head">
-      <div class="section-title"><span class="section-index">04</span> Recovery &amp; Readiness</div>
+      <div class="section-title"><span class="section-index">05</span> Recovery &amp; Readiness</div>
       <div class="section-note">Today's readiness, HRV trend, and how training effort has split across intensity bands.</div>
     </div>
     <div class="panel-triple">
@@ -880,7 +1101,7 @@ HTML_SHELL = r"""<!DOCTYPE html>
 
   <section>
     <div class="section-head">
-      <div class="section-title"><span class="section-index">05</span> Fitness Trend</div>
+      <div class="section-title"><span class="section-index">06</span> Fitness Trend</div>
       <div class="section-note">Garmin's race-time predictions and fitness scores from current training data.</div>
     </div>
     <div class="panel-split">
@@ -893,11 +1114,16 @@ HTML_SHELL = r"""<!DOCTYPE html>
         <div class="chart-caption">VO2 max trend</div>
       </div>
     </div>
+    <div class="panel" style="margin-top:16px;">
+      <div class="stat-label">Aerobic Efficiency — Easy &amp; Long Runs</div>
+      <div class="chart-box" style="height:190px; margin-top:10px;"><div id="chart-efficiency" class="svg-chart"></div></div>
+      <div class="chart-caption">Speed per heartbeat, rising = more efficient. A better read on aerobic fitness than pace alone, since it's not thrown off by hot days or hills.</div>
+    </div>
   </section>
 
   <section>
     <div class="section-head">
-      <div class="section-title"><span class="section-index">06</span> Long Run Splits</div>
+      <div class="section-title"><span class="section-index">07</span> Long Run Splits</div>
       <div class="section-note">Mile-by-mile pace, heart rate and elevation for each long run this cycle.</div>
     </div>
     <div class="panel" id="splits-panel">
@@ -910,7 +1136,7 @@ HTML_SHELL = r"""<!DOCTYPE html>
 
   <section>
     <div class="section-head">
-      <div class="section-title"><span class="section-index">07</span> Full Run Log</div>
+      <div class="section-title"><span class="section-index">08</span> Full Run Log</div>
       <div class="section-note" id="table-note">Click a column to sort · click a row for splits, cadence, HR and route.</div>
     </div>
     <div class="panel">
@@ -1050,6 +1276,9 @@ section{ margin-top:44px; }
 .badge.high, .badge.good{ background:var(--teal-dim); color:var(--teal); }
 .badge.moderate{ background:var(--amber-dim); color:var(--amber); }
 .badge.low, .badge.low-warn{ background:var(--clay-dim); color:var(--clay); }
+.badge.upcoming, .badge.no-data{ background:var(--bg-inset); color:var(--text-dim); }
+.plan-week-cell{ font-family:var(--font-mono); font-size:12.5px; }
+.plan-week-cell .phase-lbl{ display:block; font-size:10.5px; color:var(--text-dim); margin-top:1px; }
 .balance-bars{ display:flex; flex-direction:column; gap:14px; margin-top:6px; }
 .balance-row{ display:grid; grid-template-columns:74px 1fr 44px; gap:10px; align-items:center; }
 .balance-name{ font-size:12px; color:var(--text-muted); }
@@ -1222,6 +1451,41 @@ function renderVolumeChart(containerId, weekly){
   container.appendChild(svg);
 }
 
+function renderPlanChart(containerId, planWeeks){
+  const container=document.getElementById(containerId); container.innerHTML='';
+  if(!planWeeks || !planWeeks.length){ container.innerHTML="<p class='empty'>No training plan loaded.</p>"; return; }
+  const {w:W,h:H}=chartSize(container,720,300), M={top:26,right:20,bottom:34,left:42};
+  const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
+  const maxMiles=Math.max(...planWeeks.map(w=>Math.max(w.plannedMi||0, w.actualMi||0)),1);
+  const yTicks=niceTicks(0,maxMiles,5), yMax=yTicks[yTicks.length-1];
+  const yScale=v=>M.top+plotH-(v/yMax)*plotH;
+  const n=planWeeks.length, bandW=plotW/n, xCenter=i=>M.left+bandW*i+bandW/2;
+  const wkLabels=labelIndices(n, plotW, 34);
+  yTicks.forEach(t=>{ svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:yScale(t),y2:yScale(t)})); const lbl=el('text',{x:M.left-8,y:yScale(t)+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
+  const yTitle=el('text',{x:10,y:12}); yTitle.textContent='miles'; svg.appendChild(yTitle);
+  const plannedBarW=bandW*0.34, actualBarW=bandW*0.34;
+  planWeeks.forEach((w,i)=>{
+    const cx=xCenter(i);
+    const pBarX=cx-plannedBarW-2, pBarY=yScale(w.plannedMi||0);
+    const pBar=el('rect',{class:'data-point',x:pBarX,y:pBarY,width:plannedBarW,height:(M.top+plotH)-pBarY,fill:'#8b95a1',rx:2});
+    pBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.weekLabel}</div><div class="tt-row">${w.phase}</div><div class="tt-row">Planned: <b>${(w.plannedMi||0).toFixed(1)}mi</b></div>`));
+    pBar.addEventListener('mousemove',positionTooltip); pBar.addEventListener('mouseleave',hideTooltip);
+    svg.appendChild(pBar);
+    if(w.actualMi!=null){
+      const aBarX=cx+2, aBarY=yScale(w.actualMi);
+      const aBar=el('rect',{class:'data-point',x:aBarX,y:aBarY,width:actualBarW,height:(M.top+plotH)-aBarY,fill:'#e3a857',rx:2});
+      aBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.weekLabel}</div><div class="tt-row">${w.phase}</div><div class="tt-row">Actual: <b>${w.actualMi.toFixed(1)}mi</b></div>${w.adherencePct!=null?`<div class="tt-row">Adherence: <b>${w.adherencePct}%</b></div>`:''}`));
+      aBar.addEventListener('mousemove',positionTooltip); aBar.addEventListener('mouseleave',hideTooltip);
+      svg.appendChild(aBar);
+    }
+    if(wkLabels.has(i)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.weekLabel; svg.appendChild(xl); }
+  });
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
+  container.appendChild(svg);
+}
+
 function renderPaceChart(containerId, runsAsc){
   const container=document.getElementById(containerId); container.innerHTML='';
   const runs=runsAsc.filter(r=>r.paceMinMi);
@@ -1355,9 +1619,11 @@ function renderRouteMap(containerId, points){
 let RUNS_ASC=null, ACTIVE_SPLIT_ID=null;
 function redrawCharts(){
   safe('redraw volume', ()=>renderVolumeChart('chart-volume', DATA.weekly));
+  safe('redraw plan', ()=>renderPlanChart('chart-plan', DATA.planComparison));
   safe('redraw pace', ()=>{ if(RUNS_ASC) renderPaceChart('chart-pace', RUNS_ASC); });
   safe('redraw hrv', ()=>renderSeriesChart('chart-hrv', DATA.hrv, 'hrv', '#5fa8a0'));
   safe('redraw vo2', ()=>renderSeriesChart('chart-vo2', DATA.vo2max, 'vo2', '#e3a857'));
+  safe('redraw efficiency', ()=>renderSeriesChart('chart-efficiency', DATA.efficiencyTrend, 'ef', '#5fa8a0'));
   safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]) renderSplitsChart('chart-splits', DATA.longRuns[ACTIVE_SPLIT_ID].splits, 'splits-legend'); });
   Object.values(ROUTE_MAP_INSTANCES).forEach(m=>{ try{ m.invalidateSize(); }catch(e){} });
 }
@@ -1418,6 +1684,29 @@ safe('recommendation panel', function(){
 
 safe('weekly volume chart', function(){ renderVolumeChart('chart-volume', DATA.weekly); });
 
+safe('plan vs actual', function(){
+  const plan = DATA.planComparison || [];
+  renderPlanChart('chart-plan', plan);
+  const STATUS_BADGE = { 'on-track':'good', 'behind':'moderate', 'well-behind':'low-warn', 'upcoming':'upcoming', 'no-data':'no-data' };
+  const STATUS_LABEL = { 'on-track':'On Track', 'behind':'Behind', 'well-behind':'Well Behind', 'upcoming':'Upcoming', 'no-data':'No Data' };
+  document.getElementById('plan-table-body').innerHTML = plan.map(w=>{
+    const badgeClass = STATUS_BADGE[w.status] || 'no-data';
+    const badgeLabel = STATUS_LABEL[w.status] || w.status;
+    const actual = w.actualMi!=null ? `${w.actualMi.toFixed(1)}mi` : '—';
+    const adherence = w.adherencePct!=null ? `${w.adherencePct}%` : '—';
+    const longRun = w.actualLongRun!=null ? `${w.plannedLongRun.toFixed(1)} → ${w.actualLongRun.toFixed(1)}mi` : `${w.plannedLongRun.toFixed(1)}mi`;
+    return `<tr>
+      <td class="plan-week-cell">${w.weekLabel}<span class="phase-lbl">${w.phase}</span></td>
+      <td>${w.phase}</td>
+      <td>${w.plannedMi.toFixed(1)}mi</td>
+      <td>${actual}</td>
+      <td>${adherence}</td>
+      <td>${longRun}</td>
+      <td><span class="badge ${badgeClass}">${badgeLabel}</span></td>
+    </tr>`;
+  }).join('');
+});
+
 safe('pace progression chart', function(){
   const runsAsc = [...DATA.runs].sort((a,b)=> new Date(a.date)-new Date(b.date));
   RUNS_ASC = runsAsc;
@@ -1473,6 +1762,7 @@ safe('fitness trend', function(){
     <div class="score-item"><b>${DATA.hillScore!=null?DATA.hillScore:'—'}</b><span>Hill Score</span></div>
   `;
   renderSeriesChart('chart-vo2', DATA.vo2max, 'vo2', '#e3a857');
+  renderSeriesChart('chart-efficiency', DATA.efficiencyTrend, 'ef', '#5fa8a0');
 });
 
 safe('long run splits', function(){

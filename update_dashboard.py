@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from datetime import datetime, timedelta, date
 from garminconnect import Garmin
@@ -561,6 +562,96 @@ def parse_route(details):
         pts = [pts[int(i * step)] for i in range(150)]
     return pts
 
+def haversine_m(lat1, lon1, lat2, lon2):
+    r = 6371000  # meters
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lmb = math.radians(lon2 - lon1)
+    a = math.sin(d_phi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(d_lmb / 2) ** 2
+    return 2 * r * math.asin(min(1, math.sqrt(a)))
+
+def _finalize_elevation_profile(pts, max_points):
+    pts = [(d, e) for d, e in pts if isinstance(d, (int, float)) and isinstance(e, (int, float))]
+    if len(pts) < 6:
+        return None
+    pts.sort(key=lambda t: t[0])
+    if pts[-1][0] <= 0:
+        return None
+    if len(pts) > max_points:
+        step = len(pts) / max_points
+        pts = [pts[int(i * step)] for i in range(max_points)]
+    return [{"distMi": round(d * MI_PER_M, 3), "elevFt": round(e * FT_PER_M, 1)} for d, e in pts]
+
+def parse_elevation_profile(details, max_points=150):
+    # A continuous altitude trace (sampled every few seconds, not once per mile) —
+    # this is what turns the Long Run Splits elevation panel from one point per
+    # mile into an actual rolling-terrain shape. Distinct from parse_route (lat/lon
+    # only, for the map) and from build_splits' per-lap elevationGain (one number
+    # per mile). Like the GPS route parser, the exact field shape isn't confirmed
+    # against a real account, so this tries a couple of known Garmin layouts and
+    # returns None — the chart falls back to the per-mile view — if neither matches.
+    if not isinstance(details, dict):
+        return None
+
+    # Shape 1: activityDetailMetrics + metricDescriptors — the time-series API
+    # Garmin Connect's own activity page graphs against. Each row's "metrics" list
+    # is aligned by index to metricDescriptors' declared key order; look for a
+    # distance-like key and an elevation/altitude-like key.
+    descriptors = dig(details, "metricDescriptors")
+    rows = dig(details, "activityDetailMetrics")
+    if isinstance(descriptors, list) and isinstance(rows, list) and descriptors and rows:
+        dist_idx = elev_idx = None
+        for d in descriptors:
+            if not isinstance(d, dict):
+                continue
+            key = str(d.get("key", "")).lower()
+            idx = d.get("metricsIndex")
+            if idx is None:
+                continue
+            if dist_idx is None and "distance" in key:
+                dist_idx = idx
+            if elev_idx is None and ("elevation" in key or "altitude" in key):
+                elev_idx = idx
+        if dist_idx is not None and elev_idx is not None:
+            pts = []
+            for row in rows:
+                vals = row.get("metrics") if isinstance(row, dict) else None
+                if not isinstance(vals, list) or len(vals) <= max(dist_idx, elev_idx):
+                    continue
+                pts.append((vals[dist_idx], vals[elev_idx]))
+            profile = _finalize_elevation_profile(pts, max_points)
+            if profile:
+                return profile
+
+    # Shape 2: geoPolylineDTO.polyline points carrying their own altitude field —
+    # some accounts return elevation alongside each lat/lon rather than (or beside)
+    # Shape 1. These points don't come with a distance field, so distance is
+    # accumulated from consecutive lat/lon pairs via the haversine formula.
+    poly = dig(details, "geoPolylineDTO", "polyline") or dig(details, "polyline")
+    if isinstance(poly, list) and poly:
+        pts = []
+        cum_dist = 0.0
+        prev = None
+        for p in poly:
+            if not isinstance(p, dict):
+                prev = None
+                continue
+            lat = p.get("lat") or p.get("latitude")
+            lon = p.get("lon") or p.get("lng") or p.get("longitude")
+            alt = p.get("altitude") or p.get("alt") or p.get("elevation")
+            if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)) or not isinstance(alt, (int, float)):
+                prev = None
+                continue
+            if prev is not None:
+                cum_dist += haversine_m(prev[0], prev[1], lat, lon)
+            prev = (lat, lon)
+            pts.append((cum_dist, alt))
+        profile = _finalize_elevation_profile(pts, max_points)
+        if profile:
+            return profile
+
+    return None
+
 # =====================================================================
 # Coach-voice insight generators — deterministic pattern detectors, not a
 # live LLM call, so these run for free inside the GitHub Action every time.
@@ -820,11 +911,13 @@ def main():
     for i, r in enumerate(detail_candidates):
         splits = build_splits(r["id"])
         route = None
+        elev_profile = None
         if i < ROUTE_RUN_COUNT:
             details_raw = safe_method_call(client, "get_activity_details", r["id"])
             route = parse_route(details_raw)
+            elev_profile = parse_elevation_profile(details_raw)
         if splits or route:
-            run_details[str(r["id"])] = {"splits": splits, "route": route}
+            run_details[str(r["id"])] = {"splits": splits, "route": route, "elevProfile": elev_profile}
 
     # ---- Long run splits panel (mile-by-mile, for the N most recent long runs) —
     # reuses the detail fetch above when the long run falls inside that window.
@@ -836,7 +929,11 @@ def main():
         cached = run_details.get(rid)
         splits = cached["splits"] if cached else build_splits(r["id"])
         if splits:
-            long_runs_data[rid] = {"label": f"{r['dateLabel']} — {r['name']} ({r['distMi']:.1f}mi)", "splits": splits}
+            long_runs_data[rid] = {
+                "label": f"{r['dateLabel']} — {r['name']} ({r['distMi']:.1f}mi)",
+                "splits": splits,
+                "elevProfile": cached.get("elevProfile") if cached else None,
+            }
             long_runs_ordered.append((r, splits))
 
     # ---- Today's health snapshot ----
@@ -1537,13 +1634,18 @@ function renderSeriesChart(containerId, series, valueKey, color){
   container.appendChild(svg);
 }
 
-function renderSplitsChart(containerId, splits, legendId){
+function renderSplitsChart(containerId, splits, legendId, elevProfile){
   const container=document.getElementById(containerId); container.innerHTML='';
   if(!splits.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; if(legendId){ const lg=document.getElementById(legendId); if(lg) lg.innerHTML=''; } return; }
   const {w:W,h:H}=chartSize(container,720,320), M={top:28,right:20,bottom:34,left:50};
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
-  const n=splits.length, bandW=plotW/n, xCenter=i=>M.left+bandW*i+bandW/2;
+  const n=splits.length;
+  // distScale takes a continuous mile-of-run value (not just a split index), so the
+  // granular altitude trace below can plot sub-mile samples on the same axis pace/HR
+  // use — xCenter(i) is just distScale at the middle of mile i, unchanged from before.
+  const distScale=d=>M.left+(d/n)*plotW;
+  const xCenter=i=>distScale(i+0.5);
   const mileLabels=labelIndices(n, plotW, 26);
   const paces=splits.map(s=>s.pace).filter(p=>p>0);
   const paceMin=Math.min(...paces)-0.4, paceMax=Math.max(...paces)+0.4;
@@ -1553,19 +1655,41 @@ function renderSplitsChart(containerId, splits, legendId){
   const hrTicks = hrs.length ? niceTicks(Math.min(...hrs)-5,Math.max(...hrs)+5,4) : [0,1];
   const hrMin=hrTicks[0], hrMax=hrTicks[hrTicks.length-1];
   const yHr=v=>M.top+plotH-((v-hrMin)/(hrMax-hrMin))*plotH;
-  const maxElev=Math.max(...splits.map(s=>s.elevGainFt||0),1);
-  const elevCapPx=plotH*0.32, yElev=v=>(v/maxElev)*elevCapPx;
+  const baseline=M.top+plotH;
+  const elevCapPx=plotH*0.34;
   const paceTicks=niceTicks(paceMin,paceMax,5);
   paceTicks.forEach(t=>{ const y=yPace(t); if(y<M.top-1||y>M.top+plotH+1) return; svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-8,y:y+3,'text-anchor':'end'}); lbl.textContent=paceStr(t); svg.appendChild(lbl); });
   const yTitle=el('text',{x:6,y:12}); yTitle.textContent='min/mi'; svg.appendChild(yTitle);
   const y1Title=el('text',{x:W-M.right,y:12,'text-anchor':'end'}); y1Title.textContent='bpm'; svg.appendChild(y1Title);
+
+  // ---- Elevation: a sub-mile altitude trace when Garmin returned one for this run,
+  // a per-mile gain line otherwise (same shape as before, just filled instead of
+  // barred). Either way it's drawn first so pace/HR sit visually on top of it.
+  const elevColor='#7c8a9e';
+  const hasProfile = Array.isArray(elevProfile) && elevProfile.length>=6;
+  let elevPts;
+  if(hasProfile){
+    const alts=elevProfile.map(p=>p.elevFt);
+    const altMin=Math.min(...alts), altMax=Math.max(...alts), range=(altMax-altMin)||1;
+    elevPts = elevProfile.map(p=>[distScale(Math.min(Math.max(p.distMi,0),n)), baseline-((p.elevFt-altMin)/range)*elevCapPx]);
+  } else {
+    const maxGain=Math.max(...splits.map(s=>s.elevGainFt||0),1);
+    elevPts = splits.map((s,i)=>[xCenter(i), baseline-((s.elevGainFt||0)/maxGain)*elevCapPx]);
+  }
+  const elevLine = elevPts.reduce((d,p,i)=>d+(i===0?'M':'L')+p[0]+','+p[1]+' ','');
+  const elevArea = elevLine + `L${elevPts[elevPts.length-1][0]},${baseline} L${elevPts[0][0]},${baseline} Z`;
+  svg.appendChild(el('path',{d:elevArea, fill:elevColor+'2e', stroke:'none'}));
+  svg.appendChild(el('path',{d:elevLine, fill:'none', stroke:elevColor, 'stroke-width':hasProfile?1.3:1.5, 'stroke-linejoin':'round'}));
+
+  // One hover target + one x-axis label per mile regardless of which elevation
+  // resolution is showing — the tooltip always reports that mile's actual gain.
   splits.forEach((s,i)=>{
-    const cx=xCenter(i), barW=bandW*0.55, h=yElev(s.elevGainFt||0);
-    const bar=el('rect',{class:'data-point',x:cx-barW/2,y:(M.top+plotH)-h,width:barW,height:h,fill:'#22262d'});
-    bar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Mile ${s.mile}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`));
-    bar.addEventListener('mousemove',positionTooltip); bar.addEventListener('mouseleave',hideTooltip);
-    svg.appendChild(bar);
-    if(mileLabels.has(i)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent='Mi '+s.mile; svg.appendChild(xl); }
+    const x0=distScale(i), x1=distScale(i+1);
+    const hit=el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,1),height:plotH,fill:'transparent'});
+    hit.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Mile ${s.mile}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`));
+    hit.addEventListener('mousemove',positionTooltip); hit.addEventListener('mouseleave',hideTooltip);
+    svg.appendChild(hit);
+    if(mileLabels.has(i)){ const xl=el('text',{x:xCenter(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent='Mi '+s.mile; svg.appendChild(xl); }
   });
   let pacePath=''; splits.forEach((s,i)=>{ pacePath+=(i===0?'M':'L')+xCenter(i)+','+yPace(s.pace)+' '; });
   svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2.5}));
@@ -1583,7 +1707,7 @@ function renderSplitsChart(containerId, splits, legendId){
   if(legendId){
     const lg=document.getElementById(legendId);
     if(lg){
-      const legendItems=[{c:'#e3a857',t:'Pace'},{c:'#c1614a',t:'Avg HR'},{c:'#22262d',t:'Elevation gain'}];
+      const legendItems=[{c:'#e3a857',t:'Pace'},{c:'#c1614a',t:'Avg HR'},{c:elevColor,t:hasProfile?'Elevation':'Elevation gain'}];
       lg.innerHTML = legendItems.map(it=>`<div class="legend-item"><span class="legend-swatch" style="background:${it.c}"></span>${it.t}</div>`).join('');
     }
   }
@@ -1624,7 +1748,7 @@ function redrawCharts(){
   safe('redraw hrv', ()=>renderSeriesChart('chart-hrv', DATA.hrv, 'hrv', '#5fa8a0'));
   safe('redraw vo2', ()=>renderSeriesChart('chart-vo2', DATA.vo2max, 'vo2', '#e3a857'));
   safe('redraw efficiency', ()=>renderSeriesChart('chart-efficiency', DATA.efficiencyTrend, 'ef', '#5fa8a0'));
-  safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]) renderSplitsChart('chart-splits', DATA.longRuns[ACTIVE_SPLIT_ID].splits, 'splits-legend'); });
+  safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]) renderSplitsChart('chart-splits', DATA.longRuns[ACTIVE_SPLIT_ID].splits, 'splits-legend', DATA.longRuns[ACTIVE_SPLIT_ID].elevProfile); });
   Object.values(ROUTE_MAP_INSTANCES).forEach(m=>{ try{ m.invalidateSize(); }catch(e){} });
 }
 let _resizeTimer;
@@ -1786,7 +1910,7 @@ safe('long run splits', function(){
       <div class="split-meta-item"><div class="stat-label">Elev Gain</div><div class="val">${totalGain} ft</div></div>
       <div class="split-meta-item"><div class="stat-label">Fastest / Slowest Mile</div><div class="val">${fastest?paceStr(fastest.pace):'—'} → ${slowest?paceStr(slowest.pace):'—'}</div></div>
     `;
-    renderSplitsChart('chart-splits', lr.splits, 'splits-legend');
+    renderSplitsChart('chart-splits', lr.splits, 'splits-legend', lr.elevProfile);
   }
   document.getElementById('split-tabs').innerHTML = ids.map(id=>`<button class="tab-btn" data-id="${id}">${longRuns[id].label}</button>`).join('');
   document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>renderSplit(b.dataset.id)));
@@ -1844,6 +1968,7 @@ safe('run detail modal', function(){
     const detail = (DATA.runDetails && DATA.runDetails[String(id)]) || {};
     const splits = detail.splits || [];
     const route = detail.route || null;
+    const elevProfile = detail.elevProfile || null;
     const cap = DATA.meta.detailRunCount;
 
     const stat = (label, value, unit) => `<div class="modal-stat"><div class="stat-label">${label}</div><div class="stat-value">${value}${unit?`<span class="stat-unit">${unit}</span>`:''}</div></div>`;
@@ -1874,7 +1999,7 @@ safe('run detail modal', function(){
     modal.style.display='flex';
     document.body.style.overflow='hidden';
     if(route && route.length>1) renderRouteMap('modal-route', route);
-    if(splits.length) renderSplitsChart('modal-splits-chart', splits, 'modal-splits-legend');
+    if(splits.length) renderSplitsChart('modal-splits-chart', splits, 'modal-splits-legend', elevProfile);
   };
 });
 """

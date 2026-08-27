@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import statistics
 from datetime import datetime, timedelta, date
 from garminconnect import Garmin
 
@@ -686,6 +687,221 @@ def parse_elevation_profile(details, max_points=150):
     return None
 
 # =====================================================================
+# v11: a fine-grained, TIME-and-DISTANCE-indexed sample stream — the same
+# activityDetailMetrics rows parse_elevation_profile reads, additionally
+# carrying elapsed time and an instantaneous pace derived from consecutive
+# samples' own distance/time deltas (not a dedicated "speed" field, which
+# isn't confirmed to exist on every account — deriving it from distance and
+# timestamp only depends on fields already confirmed present for the
+# elevation trace). Feeds two things: a half-mile-resolution upgrade to a
+# mile-based run's splits chart, and a time-elapsed view of a structured
+# workout's laps. Like parse_elevation_profile and parse_route, the exact
+# field layout isn't confirmed against a real account — this returns None,
+# and both features fall back to their v10 behavior, if the shape doesn't
+# match or there isn't enough data to work with.
+# =====================================================================
+def parse_fine_stream(details, max_points=400):
+    if not isinstance(details, dict):
+        return None
+    descriptors = dig(details, "metricDescriptors")
+    rows = dig(details, "activityDetailMetrics")
+    if not (isinstance(descriptors, list) and isinstance(rows, list) and descriptors and rows):
+        return None
+    dist_idx = time_idx = elev_idx = hr_idx = None
+    for d in descriptors:
+        if not isinstance(d, dict):
+            continue
+        key = str(d.get("key", "")).lower()
+        idx = d.get("metricsIndex")
+        if idx is None:
+            continue
+        if dist_idx is None and "distance" in key:
+            dist_idx = idx
+        if time_idx is None and "timestamp" in key:
+            time_idx = idx
+        if elev_idx is None and ("elevation" in key or "altitude" in key):
+            elev_idx = idx
+        if hr_idx is None and "heartrate" in key:
+            hr_idx = idx
+    if dist_idx is None or time_idx is None:
+        return None  # pace needs both distance and elapsed time — nothing to derive it from otherwise
+    known = [i for i in (dist_idx, time_idx, elev_idx, hr_idx) if i is not None]
+    need = max(known)
+    raw = []
+    for row in rows:
+        vals = row.get("metrics") if isinstance(row, dict) else None
+        if not isinstance(vals, list) or len(vals) <= need:
+            continue
+        d_m, t_raw = vals[dist_idx], vals[time_idx]
+        if not isinstance(d_m, (int, float)) or not isinstance(t_raw, (int, float)):
+            continue
+        e_ft = m_to_ft(vals[elev_idx]) if elev_idx is not None and isinstance(vals[elev_idx], (int, float)) else None
+        hr = vals[hr_idx] if hr_idx is not None and isinstance(vals[hr_idx], (int, float)) else None
+        raw.append((t_raw, d_m, e_ft, hr))
+    if len(raw) < 8:
+        return None
+    raw.sort(key=lambda r: r[0])
+    t0 = raw[0][0]
+    out = []
+    prev = None
+    for t_raw, d_m, e_ft, hr in raw:
+        t = t_raw - t0
+        pace = None
+        if prev is not None:
+            dt, dd = t - prev[0], d_m - prev[1]
+            if dt > 0 and dd > 0:
+                pace = (dt / 60) / (dd * MI_PER_M)
+        out.append({"t": t, "d": d_m, "elevFt": e_ft, "hr": hr, "paceMinMi": pace})
+        prev = (t, d_m)
+    if len(out) > max_points * 2:
+        step = len(out) / (max_points * 2)
+        out = [out[int(i * step)] for i in range(max_points * 2)]
+    return out if len(out) >= 8 else None
+
+PACE_BIN_MI = 0.5  # half-mile — the fixed resolution of the v11 upgraded splits chart
+
+def _finalize_pace_profile(pts, bin_mi=PACE_BIN_MI):
+    # Bins the fine stream above into fixed-width buckets by distance, same
+    # approach as _finalize_elevation_profile, but averaging pace/HR (and a
+    # local elevation-gain figure) per bucket instead of just altitude —
+    # giving the splits chart real sub-mile detail instead of one point per
+    # whole Garmin autolap, from data that's already being fetched for the
+    # elevation trace (no extra API call).
+    pts = [p for p in pts if isinstance(p.get("d"), (int, float))]
+    if len(pts) < 8:
+        return None
+    pts.sort(key=lambda p: p["d"])
+    total_m = pts[-1]["d"]
+    if total_m <= 0:
+        return None
+    total_mi = total_m * MI_PER_M
+    if total_mi < bin_mi * 1.5:
+        return None  # too short a run for sub-mile bins to add anything real
+    n_bins = max(1, math.ceil(total_mi / bin_mi))
+    buckets = [[] for _ in range(n_bins)]
+    for p in pts:
+        idx = min(n_bins - 1, int((p["d"] * MI_PER_M) / bin_mi))
+        buckets[idx].append(p)
+    out = []
+    for i, b in enumerate(buckets):
+        paces = [p["paceMinMi"] for p in b if p.get("paceMinMi")]
+        if len(b) < 2 or not paces:
+            continue
+        hrs = [p["hr"] for p in b if p.get("hr")]
+        elevs = [p["elevFt"] for p in b if isinstance(p.get("elevFt"), (int, float))]
+        gain = sum(max(0.0, elevs[j] - elevs[j - 1]) for j in range(1, len(elevs)))
+        end_mi = min((i + 1) * bin_mi, total_mi)
+        out.append({
+            "mile": f"{end_mi:g}",
+            "distMi": round(min(bin_mi, total_mi - i * bin_mi), 3),
+            "pace": round(sum(paces) / len(paces), 2),
+            "avgHr": round(sum(hrs) / len(hrs)) if hrs else None,
+            "maxHr": None,
+            "elevGainFt": round(gain) if elevs else 0,
+            "cadence": None,
+        })
+    # a genuinely short leftover final bin (well under a full bucket width) is
+    # the same "unfinished mile" situation v9 already trims for whole-mile
+    # splits — drop it here too, scaled to the finer bin width.
+    if len(out) > 1 and out[-1]["distMi"] < bin_mi * 0.6:
+        out.pop()
+    return out if len(out) >= 4 else None
+
+def label_interval_laps(out):
+    # Classifies a structured workout's already-built lap list as Warm Up /
+    # Interval N / Recovery N / Cool Down, using the DATA (each lap's own
+    # distance and pace) rather than assuming a fixed alternating pattern —
+    # a workout that doesn't strictly alternate (a ladder, back-to-back reps
+    # with no jog between) still classifies sensibly. A first or last lap is
+    # only called Warm Up / Cool Down when it's meaningfully longer than the
+    # interior reps (a real warm-up/cool-down mile, not just the first rep);
+    # the interior laps split into Interval vs. Recovery by comparing each
+    # one's pace against the workout's own median interior pace, so it's
+    # calibrated to how hard THIS workout actually was, not a fixed number.
+    n = len(out)
+    if n == 0:
+        return out
+
+    def dist_of(s):
+        return s["distMi"] if s["distMi"] is not None else 0.0
+
+    # fold a tiny trailing sliver (a GPS-stop artifact, not a real segment)
+    # into the lap before it rather than giving it its own nonsensical row.
+    if n >= 2 and dist_of(out[-1]) < 0.12 and dist_of(out[-1]) < dist_of(out[-2]) * 0.3:
+        last = out.pop()
+        prev = out[-1]
+        merged_dist = dist_of(prev) + dist_of(last)
+        merged_dur = (prev.get("durationSec") or 0) + (last.get("durationSec") or 0)
+        prev["distMi"] = round(merged_dist, 2)
+        prev["durationSec"] = merged_dur
+        if merged_dist > 0 and merged_dur > 0:
+            prev["pace"] = round((merged_dur / 60) / merged_dist, 2)
+        prev["elevGainFt"] = (prev.get("elevGainFt") or 0) + (last.get("elevGainFt") or 0)
+        n = len(out)
+
+    dists = [dist_of(s) for s in out]
+    interior = dists[1:-1] if n > 2 else []
+    interior_median = statistics.median(interior) if interior else 0
+    has_warmup = n > 2 and interior_median > 0 and dists[0] >= max(0.5, interior_median * 1.6)
+    has_cooldown = n > 2 and interior_median > 0 and dists[-1] >= max(0.5, interior_median * 1.6)
+    if has_warmup:
+        out[0]["mile"] = "Warm Up"
+    if has_cooldown:
+        out[-1]["mile"] = "Cool Down"
+
+    body_lo = 1 if has_warmup else 0
+    body_hi = (n - 2) if has_cooldown else (n - 1)
+    body_idx = [i for i in range(body_lo, body_hi + 1) if out[i]["pace"]]
+    if body_idx:
+        threshold = statistics.median([out[i]["pace"] for i in body_idx])
+        interval_n = recovery_n = 0
+        for i in body_idx:
+            if out[i]["pace"] <= threshold:
+                interval_n += 1
+                out[i]["mile"] = f"Interval {interval_n}"
+            else:
+                recovery_n += 1
+                out[i]["mile"] = f"Recovery {recovery_n}"
+    return out
+
+def build_interval_timeline(labeled_out, fine_pts):
+    # Turns a structured workout's labeled laps + the fine time/pace stream
+    # above into the data a time-elapsed chart needs: a "band" per segment
+    # (its label, its real start/end in elapsed time, its average pace/HR)
+    # sized by how long it actually lasted, plus the fine pace/HR curve
+    # itself so the chart can show a rep's shape, not just its average.
+    # Caveat worth knowing: band boundaries come from the lap-splits endpoint
+    # and the fine curve comes from the activity-details endpoint — two
+    # different Garmin calls lined up by elapsed time, so on some accounts
+    # they may drift slightly out of sync at a boundary rather than being
+    # pixel-perfect.
+    if not fine_pts:
+        return None
+    valid = [p for p in fine_pts if isinstance(p.get("t"), (int, float)) and p.get("paceMinMi")]
+    if len(valid) < 8:
+        return None
+    valid.sort(key=lambda p: p["t"])
+    bands = []
+    t_cursor = 0.0
+    for s in labeled_out:
+        dur = s.get("durationSec") or 0
+        if dur <= 0:
+            continue
+        bands.append({
+            "label": s["mile"],
+            "start": round(t_cursor, 1),
+            "end": round(t_cursor + dur, 1),
+            "durSec": round(dur, 1),
+            "pace": s["pace"],
+            "avgHr": s.get("avgHr"),
+        })
+        t_cursor += dur
+    if not bands:
+        return None
+    fine = [{"t": round(p["t"], 1), "pace": round(p["paceMinMi"], 2), "hr": round(p["hr"]) if p.get("hr") else None} for p in valid]
+    return {"totalTime": round(t_cursor, 1), "bands": bands, "fine": fine}
+
+# =====================================================================
 # Coach-voice insight generators — deterministic pattern detectors, not a
 # live LLM call, so these run for free inside the GitHub Action every time.
 # =====================================================================
@@ -748,8 +964,12 @@ def insight_terrain(runs_asc, long_run_splits_by_id, today):
             if splits:
                 steepest = max(splits["splits"], key=lambda s: s.get("elevGainFt") or 0)
                 if steepest.get("elevGainFt"):
-                    unit = "Mile" if splits.get("mileBased", True) else "Lap"
-                    extra = f" {unit} {steepest['mile']} alone carried {steepest['elevGainFt']}ft of that gain and slowed to {fmt_pace_mmss(steepest['pace'])}/mi."
+                    # A mile-based split's "mile" field is a bare number ("3") and
+                    # needs the "Mile" prefix; a structured workout's is already a
+                    # self-describing label ("Interval 3") and reads fine alone.
+                    mile_based_flag = splits.get("mileBased", True)
+                    label = f"Mile {steepest['mile']}" if mile_based_flag else str(steepest['mile'])
+                    extra = f" {label} alone carried {steepest['elevGainFt']}ft of that gain and slowed to {fmt_pace_mmss(steepest['pace'])}/mi."
             return {"type": "watch", "icon": "TERRAIN",
                     "html": (f"The {r['dateLabel']} {r['name']} run came in noticeably slower than usual: "
                              f"{fmt_pace_mmss(r['paceMinMi'])}/mi against a typical {fmt_pace_mmss(typical_pace)}/mi, "
@@ -925,7 +1145,7 @@ def main():
     # expand modal, covering the N most recent runs. Bounded to keep the daily
     # sync's API-call count and page payload reasonable — older runs still show
     # their summary stats when clicked, just not lap-by-lap detail.
-    def build_splits(activity_id):
+    def build_splits(activity_id, fine_pts=None):
         splits_raw = safe_call(client.get_activity_splits, activity_id)
         laps = dig(splits_raw, "lapDTOs", default=[]) or []
         out = []
@@ -940,6 +1160,7 @@ def main():
                 "maxHr": lap.get("maxHR"),
                 "elevGainFt": round(m_to_ft(lap.get("elevationGain"))) if lap.get("elevationGain") is not None else 0,
                 "cadence": lap.get("averageRunningCadenceInStepsPerMinute"),
+                "durationSec": lap.get("duration"),
             })
         # Garmin only auto-laps at each full mile on runs where mile-autolap was
         # the active lap trigger. A structured workout (interval reps, tempo
@@ -950,13 +1171,13 @@ def main():
         # than trust the run's Tempo/Speed/Long-Run label (which is itself a
         # name-based guess), this looks at the lap DISTANCES actually returned:
         # if most of them cluster near 1.00mi, it's real per-mile autolaps;
-        # otherwise it's a structured workout and gets labeled "Lap N" (with its
-        # real distance shown) instead of a misleading "Mile N".
+        # otherwise it's a structured workout.
         checkable = [s["distMi"] for s in out[:-1] if s["distMi"] is not None] if len(out) > 1 else []
         if not checkable:
             checkable = [s["distMi"] for s in out if s["distMi"] is not None]
         mile_based = bool(checkable) and (sum(1 for d in checkable if 0.85 <= d <= 1.15) / len(checkable)) >= 0.6
 
+        time_series = None
         if mile_based:
             # The trailing lap is usually whatever partial distance was left when
             # the run ended, not a finished mile (see note above) — a few seconds
@@ -964,23 +1185,42 @@ def main():
             # skews the whole chart's scale. Drop it, down to 1 lap minimum.
             while len(out) > 1 and out[-1]["distMi"] is not None and out[-1]["distMi"] < 0.9:
                 out.pop()
-        # For a structured workout, every lap (work rep AND recovery jog) is real,
-        # correctly-accounted-for distance — nothing here is a "leftover partial
-        # mile," so nothing gets dropped; it's just labeled and charted as laps.
-        return out, mile_based
+            # v11: upgrade from one point per whole mile to one point per half
+            # mile when the fine-grained stream (same one the elevation trace
+            # reads) is available and covers this run — real extra terrain/pace
+            # detail, not just more dots. Falls back to the whole-mile array
+            # above otherwise.
+            if fine_pts:
+                upgraded = _finalize_pace_profile(fine_pts)
+                if upgraded:
+                    out = upgraded
+        else:
+            # For a structured workout, every lap (work rep AND recovery jog) is
+            # real, correctly-accounted-for distance — nothing here is a
+            # "leftover partial mile," so nothing gets dropped, just labeled by
+            # what it actually was (see label_interval_laps). When the fine
+            # stream is also available, additionally build the time-elapsed
+            # view (see build_interval_timeline) — each segment's width is how
+            # long it actually lasted, with real within-segment pace/HR detail.
+            out = label_interval_laps(out)
+            if fine_pts:
+                time_series = build_interval_timeline(out, fine_pts)
+        return out, mile_based, time_series
 
     detail_candidates = runs_desc[:DETAIL_RUN_COUNT]
     run_details = {}
     for i, r in enumerate(detail_candidates):
-        splits, mile_based = build_splits(r["id"])
         route = None
         elev_profile = None
+        fine_pts = None
         if i < ROUTE_RUN_COUNT:
             details_raw = safe_method_call(client, "get_activity_details", r["id"])
             route = parse_route(details_raw)
             elev_profile = parse_elevation_profile(details_raw)
+            fine_pts = parse_fine_stream(details_raw)
+        splits, mile_based, time_series = build_splits(r["id"], fine_pts)
         if splits or route:
-            run_details[str(r["id"])] = {"splits": splits, "route": route, "elevProfile": elev_profile, "mileBased": mile_based}
+            run_details[str(r["id"])] = {"splits": splits, "route": route, "elevProfile": elev_profile, "mileBased": mile_based, "timeSeries": time_series}
 
     # ---- Long run splits panel (mile-by-mile, for the N most recent long runs) —
     # reuses the detail fetch above when the long run falls inside that window.
@@ -990,13 +1230,14 @@ def main():
     for r in long_run_candidates:
         rid = str(r["id"])
         cached = run_details.get(rid)
-        splits, mile_based = (cached["splits"], cached["mileBased"]) if cached else build_splits(r["id"])
+        splits, mile_based, time_series = (cached["splits"], cached["mileBased"], cached["timeSeries"]) if cached else build_splits(r["id"])
         if splits:
             long_runs_data[rid] = {
                 "label": f"{r['dateLabel']} — {r['name']} ({r['distMi']:.1f}mi)",
                 "splits": splits,
                 "mileBased": mile_based,
                 "elevProfile": cached.get("elevProfile") if cached else None,
+                "timeSeries": time_series,
             }
             long_runs_ordered.append((r, splits))
 
@@ -1951,7 +2192,12 @@ function renderSplitsChart(containerId, splits, legendId, elevProfile, mileBased
   // even index-spacing) since splits are no longer necessarily equal-width —
   // a run with several short, tightly-clustered reps needs fewer visible
   // labels than its raw split count would suggest under an even-spacing guess.
-  const splitLabelMinGap = widestLabelPx(splits.map(s=>labelWord.slice(0,mileBased?2:3)+' '+s.mile));
+  // A lap's "mile" field is either a bare number (a real mile-based split) or
+  // a self-describing string like "Interval 3" (v11's structured-workout
+  // labeling) — the latter reads fine on its own and doesn't want a "Lap "
+  // prefix stuck in front of it.
+  const isSemanticLabel = s => !/^[0-9.]+$/.test(String(s.mile));
+  const splitLabelMinGap = widestLabelPx(splits.map(s=>isSemanticLabel(s) ? s.mile : labelWord.slice(0,mileBased?2:3)+' '+s.mile));
   const labelIdx=[]; let lastLabelX=-Infinity;
   for(let i=0;i<n;i++){ const x=xCenter(i); if(x-lastLabelX>=splitLabelMinGap){ labelIdx.push(i); lastLabelX=x; } }
   if(labelIdx[labelIdx.length-1]!==n-1){
@@ -1997,14 +2243,14 @@ function renderSplitsChart(containerId, splits, legendId, elevProfile, mileBased
   // resolution is showing — the tooltip always reports that split's actual gain.
   // Each split's tooltip title includes its real distance for a "Lap" (not a
   // "Mile") since "Lap 3" alone doesn't tell you it was a 0.52mi rep.
-  const splitTitle = s => mileBased ? `${labelWord} ${s.mile}` : `${labelWord} ${s.mile}${s.distMi!=null?` · ${s.distMi.toFixed(2)}mi`:''}`;
+  const splitTitle = s => { const word = isSemanticLabel(s) ? s.mile : `${labelWord} ${s.mile}`; return mileBased ? word : `${word}${s.distMi!=null?` · ${s.distMi.toFixed(2)}mi`:''}`; };
   splits.forEach((s,i)=>{
     const x0=distScale(cum[i]), x1=distScale(cum[i+1]);
     const hit=el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,1),height:plotH,fill:'transparent'});
     hit.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`));
     hit.addEventListener('mousemove',positionTooltip); hit.addEventListener('mouseleave',hideTooltip);
     svg.appendChild(hit);
-    if(mileLabels.has(i)){ const xl=el('text',{x:xCenter(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=(mileBased?'Mi ':'Lap ')+s.mile; svg.appendChild(xl); }
+    if(mileLabels.has(i)){ const xl=el('text',{x:xCenter(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent = isSemanticLabel(s) ? s.mile : (mileBased?'Mi ':'Lap ')+s.mile; svg.appendChild(xl); }
   });
   let pacePath=''; splits.forEach((s,i)=>{ pacePath+=(i===0?'M':'L')+xCenter(i)+','+yPace(s.pace)+' '; });
   svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2.5}));
@@ -2025,6 +2271,116 @@ function renderSplitsChart(containerId, splits, legendId, elevProfile, mileBased
       const legendItems=[{c:'#e3a857',t:'Pace'},{c:'#c1614a',t:'Avg HR'},{c:elevColor,t:hasProfile?'Elevation':'Elevation gain'}];
       lg.innerHTML = legendItems.map(it=>`<div class="legend-item"><span class="legend-swatch" style="background:${it.c}"></span>${it.t}</div>`).join('');
     }
+  }
+}
+
+// v11 — a structured workout's splits chart, when the fine-grained time/pace
+// stream is available for it (see build_interval_timeline in the Python
+// above): the x-axis is elapsed TIME rather than distance, so each segment's
+// width is literally how long it lasted (a recovery jog can end up nearly as
+// wide as the interval before it, even though it covered half the ground),
+// and the pace/HR lines are drawn from many samples across the segment
+// instead of one averaged dot per lap — so a rep's actual shape (going out
+// fast and fading, easing down through a recovery jog) is visible instead of
+// hidden inside a lap average. Falls back to the distance-based
+// renderSplitsChart above (via registerSplitsChart below) whenever this data
+// isn't there for a given run.
+function segKindColor(label){
+  if(label==='Warm Up' || label==='Cool Down') return '#5c6570';
+  if(label.startsWith('Interval')) return '#c1614a';
+  if(label.startsWith('Recovery')) return '#6690c4';
+  return '#5c6570';
+}
+function fmtElapsed(sec){
+  sec = Math.max(0, Math.round(sec));
+  const m = Math.floor(sec/60), s = sec%60;
+  return `${m}:${s.toString().padStart(2,'0')}`;
+}
+function renderIntervalTimeChart(containerId, timeSeries, legendId){
+  const container=document.getElementById(containerId); container.innerHTML='';
+  const bands = timeSeries && timeSeries.bands, fine = timeSeries && timeSeries.fine;
+  if(!bands || !bands.length || !fine || !fine.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; if(legendId){ const lg=document.getElementById(legendId); if(lg) lg.innerHTML=''; } return; }
+  const {w:W,h:H}=chartSize(container,760,320), M={top:30,right:20,bottom:34,left:50};
+  const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
+  const totalTime = bands[bands.length-1].end;
+  const xScale = t => M.left + (Math.min(Math.max(t,0),totalTime)/totalTime)*plotW;
+
+  const paces = fine.map(p=>p.pace).filter(p=>p>0);
+  const paceMin=Math.min(...paces)-0.4, paceMax=Math.max(...paces)+0.4;
+  const yPace = v => M.top + ((v-paceMin)/(paceMax-paceMin))*plotH;
+  const hrsAll = fine.map(p=>p.hr).filter(h=>h);
+  const hasHr = hrsAll.length>0;
+  const hrTicks = hasHr ? niceTicks(Math.min(...hrsAll)-5, Math.max(...hrsAll)+5, 4) : [0,1];
+  const hrMin=hrTicks[0], hrMax=hrTicks[hrTicks.length-1];
+  const yHr = v => M.top+plotH-((v-hrMin)/(hrMax-hrMin))*plotH;
+
+  bands.forEach(b=>{
+    const x0=xScale(b.start), x1=xScale(b.end);
+    const color=segKindColor(b.label);
+    svg.appendChild(el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,0.5),height:plotH,fill:color+'1c'}));
+    const hit=el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,1),height:plotH,fill:'transparent'});
+    hit.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${b.label}</div><div class="tt-row">Held for <b>${fmtElapsed(b.durSec)}</b></div><div class="tt-row">Pace: <b>${paceStr(b.pace)}/mi</b></div>${b.avgHr?`<div class="tt-row">Avg HR: <b>${b.avgHr} bpm</b></div>`:''}`));
+    hit.addEventListener('mousemove',positionTooltip); hit.addEventListener('mouseleave',hideTooltip);
+    svg.appendChild(hit);
+    const full = (b.label==='Warm Up'||b.label==='Cool Down');
+    const short = full ? b.label : b.label.replace(/^(Interval|Recovery) /,'');
+    const text = (x1-x0) > (full?60:20) ? short : null;
+    if(text){
+      const cx=(x0+x1)/2;
+      const estW = text.length*6.4+10;
+      svg.appendChild(el('rect',{x:cx-estW/2,y:M.top+3,width:estW,height:15,rx:3,fill:'#0d1013',"fill-opacity":0.72}));
+      const lbl=el('text',{x:cx,y:M.top+14,'text-anchor':'middle'});
+      lbl.style.fill = color; lbl.style.fontWeight = '600'; lbl.textContent=text;
+      svg.appendChild(lbl);
+    }
+    svg.appendChild(el('line',{x1:x1,x2:x1,y1:M.top,y2:M.top+plotH,stroke:'var(--border-soft)','stroke-width':1}));
+  });
+
+  const paceTicks=niceTicks(paceMin,paceMax,5);
+  paceTicks.forEach(t=>{ const y=yPace(t); if(y<M.top-1||y>M.top+plotH+1) return; svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-8,y:y+3,'text-anchor':'end'}); lbl.textContent=paceStr(t); svg.appendChild(lbl); });
+  const yTitle=el('text',{x:6,y:12}); yTitle.textContent='min/mi'; svg.appendChild(yTitle);
+  const y1Title=el('text',{x:W-M.right,y:12,'text-anchor':'end'}); y1Title.textContent='bpm'; svg.appendChild(y1Title);
+
+  const timeTickCount = Math.max(4, Math.min(10, Math.round(totalTime/300)));
+  niceTicks(0, totalTime, timeTickCount).forEach(t=>{
+    if(t<0||t>totalTime) return;
+    const lbl=el('text',{x:xScale(t),y:H-M.bottom+16,'text-anchor':'middle'});
+    lbl.textContent=fmtElapsed(t);
+    svg.appendChild(lbl);
+  });
+
+  let pacePath=''; fine.forEach((p,i)=>{ pacePath+=(i===0?'M':'L')+xScale(p.t)+','+yPace(p.pace)+' '; });
+  svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2}));
+  if(hasHr){
+    let hrPath=''; fine.forEach((p,i)=>{ hrPath+=(i===0?'M':'L')+xScale(p.t)+','+yHr(p.hr||hrMin)+' '; });
+    svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#c1614a','stroke-width':2}));
+  }
+
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
+  svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
+  container.appendChild(svg);
+
+  if(legendId){
+    const lg=document.getElementById(legendId);
+    if(lg){
+      const items=[{c:'#e3a857',t:'Pace'}];
+      if(hasHr) items.push({c:'#c1614a',t:'Avg HR'});
+      items.push({c:'#5c6570',t:'Warm up / Cool down'},{c:'#c1614a',t:'Interval'},{c:'#6690c4',t:'Recovery'});
+      lg.innerHTML = items.map(it=>`<div class="legend-item"><span class="legend-swatch" style="background:${it.c}"></span>${it.t}</div>`).join('');
+    }
+  }
+}
+
+// Picks the right splits renderer for a run: the v11 time-elapsed chart when
+// a structured workout has the fine-grained stream available, the regular
+// distance-based chart otherwise (including every mile-based run, and a
+// structured workout whose fine stream wasn't available this sync).
+function registerSplitsChart(containerId, title, splits, legendId, elevProfile, mileBased, timeSeries){
+  if(!mileBased && timeSeries){
+    registerChart(containerId, title, renderIntervalTimeChart, timeSeries, legendId);
+  } else {
+    registerChart(containerId, title, renderSplitsChart, splits, legendId, elevProfile, mileBased);
   }
 }
 
@@ -2078,7 +2434,7 @@ function redrawCharts(){
   safe('redraw hrv', ()=>registerChart('chart-hrv', 'HRV Trend', renderSeriesChart, DATA.hrv, 'hrv', '#5fa8a0'));
   safe('redraw vo2', ()=>registerChart('chart-vo2', 'VO2 Max Trend', renderSeriesChart, DATA.vo2max, 'vo2', '#e3a857'));
   safe('redraw efficiency', ()=>registerChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', renderSeriesChart, DATA.efficiencyTrend, 'ef', '#5fa8a0'));
-  safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]){ const lr=DATA.longRuns[ACTIVE_SPLIT_ID]; registerChart('chart-splits', `Long Run Splits — ${lr.label}`, renderSplitsChart, lr.splits, 'splits-legend', lr.elevProfile, lr.mileBased); } });
+  safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]){ const lr=DATA.longRuns[ACTIVE_SPLIT_ID]; registerSplitsChart('chart-splits', `Long Run Splits — ${lr.label}`, lr.splits, 'splits-legend', lr.elevProfile, lr.mileBased, lr.timeSeries); } });
   Object.values(ROUTE_MAP_INSTANCES).forEach(m=>{ try{ m.invalidateSize(); }catch(e){} });
   if(ZOOM.chartId && CHART_REGISTRY[ZOOM.chartId] && document.getElementById('chart-zoom-modal').style.display!=='none'){
     resetZoom(); // also schedules a re-render at the viewport's new size
@@ -2243,7 +2599,7 @@ safe('long run splits', function(){
       <div class="split-meta-item"><div class="stat-label">Elev Gain</div><div class="val">${totalGain} ft</div></div>
       <div class="split-meta-item"><div class="stat-label">Fastest / Slowest Mile</div><div class="val">${fastest?paceStr(fastest.pace):'—'} → ${slowest?paceStr(slowest.pace):'—'}</div></div>
     `;
-    registerChart('chart-splits', `Long Run Splits — ${lr.label}`, renderSplitsChart, lr.splits, 'splits-legend', lr.elevProfile, lr.mileBased);
+    registerSplitsChart('chart-splits', `Long Run Splits — ${lr.label}`, lr.splits, 'splits-legend', lr.elevProfile, lr.mileBased, lr.timeSeries);
   }
   document.getElementById('split-tabs').innerHTML = ids.map(id=>`<button class="tab-btn" data-id="${id}">${longRuns[id].label}</button>`).join('');
   document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>renderSplit(b.dataset.id)));
@@ -2308,7 +2664,7 @@ safe('run detail modal', function(){
     // data itself, so the modal just reads that flag rather than guessing again.
     const mileBased = detail.mileBased !== false;
     const splitsSectionTitle = mileBased ? 'Mile Splits' : 'Lap Splits';
-    const splitsFirstCol = mileBased ? 'Mile' : 'Lap';
+    const splitsFirstCol = mileBased ? 'Mile' : 'Segment';
 
     const stat = (label, value, unit) => `<div class="modal-stat"><div class="stat-label">${label}</div><div class="stat-value">${value}${unit?`<span class="stat-unit">${unit}</span>`:''}</div></div>`;
     let html = `
@@ -2338,7 +2694,7 @@ safe('run detail modal', function(){
     modal.style.display='flex';
     document.body.style.overflow='hidden';
     if(route && route.length>1) renderRouteMap('modal-route', route);
-    if(splits.length) registerChart('modal-splits-chart', `${splitsSectionTitle} — ${run.name}`, renderSplitsChart, splits, 'modal-splits-legend', elevProfile, mileBased);
+    if(splits.length) registerSplitsChart('modal-splits-chart', `${splitsSectionTitle} — ${run.name}`, splits, 'modal-splits-legend', elevProfile, mileBased, detail.timeSeries);
     attachChartExpandButtons(body);
   };
 });

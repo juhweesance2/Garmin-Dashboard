@@ -1584,20 +1584,11 @@ HTML_SHELL = r"""<!DOCTYPE html>
   <div class="chart-zoom-panel">
     <div class="chart-zoom-toolbar">
       <span class="chart-zoom-title" id="chart-zoom-title"></span>
-      <div class="chart-zoom-controls">
-        <button type="button" id="chart-zoom-out" aria-label="Zoom out">−</button>
-        <span id="chart-zoom-level">100%</span>
-        <button type="button" id="chart-zoom-in" aria-label="Zoom in">+</button>
-        <button type="button" id="chart-zoom-reset" aria-label="Reset zoom">⟲</button>
-        <button type="button" id="chart-zoom-close" class="chart-zoom-close-btn" aria-label="Close">&times;</button>
-      </div>
+      <button type="button" id="chart-zoom-close" class="chart-zoom-close-btn" aria-label="Close">&times;</button>
     </div>
-    <div class="chart-zoom-viewport" id="chart-zoom-viewport">
-      <div class="chart-zoom-stage" id="chart-zoom-stage">
-        <div class="chart-box" id="chart-zoom-box"><div id="chart-zoom-target" class="svg-chart"></div></div>
-      </div>
-    </div>
-    <div class="chart-zoom-hint">Scroll or pinch to widen the x-axis · drag to pan · double-click to reset</div>
+    <div id="chart-zoom-toolbar-slot"></div>
+    <div class="chart-box" id="chart-zoom-box"></div>
+    <div class="chart-zoom-hint">Scroll/pinch to zoom · drag to pan · double-click or double-tap to reset</div>
   </div>
 </div>
 <div id="chart-tooltip"></div>
@@ -1670,13 +1661,20 @@ section{ margin-top:44px; }
 }
 .chart-box{ position:relative; height:260px; }
 .chart-box.tall{ height:320px; }
-.svg-chart{ width:100%; height:100%; }
+.svg-chart{ width:100%; height:100%; cursor:default; touch-action:none; }
+.svg-chart.zoomed{ cursor:grab; }
+.svg-chart.panning{ cursor:grabbing; }
 .svg-chart svg{ width:100%; height:100%; display:block; overflow:visible; }
 .svg-chart text{ font-family:var(--font-mono); fill:var(--text-dim); font-size:10px; }
 .svg-chart .axis-line{ stroke:var(--border); stroke-width:1; }
 .svg-chart .grid-line{ stroke:var(--border-soft); stroke-width:1; }
 .svg-chart .data-point{ cursor:pointer; }
 .svg-chart .data-point:hover{ filter:brightness(1.3); }
+.chart-toolbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:10px; flex-wrap:wrap; }
+.zoom-range{ font-family:var(--font-mono); font-size:11px; color:var(--text-dim); }
+.zoom-reset-btn{ font-family:var(--font-mono); font-size:11px; color:var(--text-dim); background:var(--bg-raised); border:1px solid var(--border); border-radius:6px; padding:4px 9px; cursor:pointer; opacity:0; pointer-events:none; transition:opacity .15s, color .15s, border-color .15s; }
+.zoom-reset-btn.show{ opacity:1; pointer-events:auto; }
+.zoom-reset-btn:hover{ color:var(--text); border-color:var(--text-dim); }
 #chart-tooltip{ position:fixed; pointer-events:none; z-index:999; background:var(--bg-raised); border:1px solid var(--border); border-radius:6px; padding:8px 11px; font-family:var(--font-mono); font-size:12px; color:var(--text); box-shadow:0 8px 20px rgba(0,0,0,0.4); display:none; max-width:220px; line-height:1.5; }
 #chart-tooltip .tt-title{ font-family:var(--font-body); font-weight:600; color:var(--text); margin-bottom:3px; font-size:12.5px; }
 #chart-tooltip .tt-row{ color:var(--text-muted); }
@@ -1791,19 +1789,14 @@ footer .update-note b{ color:var(--text-muted); }
 .chart-expand-btn{ position:absolute; top:8px; right:8px; width:26px; height:26px; display:flex; align-items:center; justify-content:center; background:var(--bg-raised); border:1px solid var(--border); border-radius:6px; color:var(--text-dim); font-size:13px; line-height:1; cursor:pointer; opacity:0.55; transition:opacity .15s, color .15s, border-color .15s; z-index:2; }
 .chart-expand-btn:hover, .chart-expand-btn:focus-visible{ opacity:1; color:var(--text); border-color:var(--text-dim); }
 .chart-zoom-overlay{ align-items:center; z-index:1200; }
-.chart-zoom-panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:14px; width:min(96vw,1140px); height:min(90vh,740px); padding:14px 16px 12px; display:flex; flex-direction:column; margin:0; }
+.chart-zoom-panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:14px; width:min(96vw,1140px); max-height:92vh; padding:14px 16px 12px; display:flex; flex-direction:column; margin:0; overflow-y:auto; }
 .chart-zoom-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .chart-zoom-title{ font-family:var(--font-display); font-weight:700; font-size:15px; text-wrap:balance; }
-.chart-zoom-controls{ display:flex; align-items:center; gap:6px; flex-shrink:0; }
-.chart-zoom-controls button{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:var(--bg-raised); border:1px solid var(--border); border-radius:7px; color:var(--text-muted); font-size:16px; line-height:1; cursor:pointer; }
-.chart-zoom-controls button:hover{ color:var(--text); border-color:var(--text-dim); }
-.chart-zoom-controls button.chart-zoom-close-btn{ font-size:19px; margin-left:6px; }
-#chart-zoom-level{ font-family:var(--font-mono); font-size:11px; color:var(--text-dim); min-width:38px; text-align:center; }
-.chart-zoom-viewport{ flex:1; margin-top:10px; position:relative; overflow-x:auto; overflow-y:hidden; border:1px solid var(--border-soft); border-radius:10px; background:var(--bg-inset); touch-action:pan-x; cursor:default; }
-.chart-zoom-viewport.pannable{ cursor:grab; }
-.chart-zoom-viewport.panning{ cursor:grabbing; }
-.chart-zoom-stage{ width:100%; height:100%; }
-#chart-zoom-box{ width:100%; height:100%; }
+.chart-zoom-close-btn{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:var(--bg-raised); border:1px solid var(--border); border-radius:7px; color:var(--text-muted); font-size:19px; line-height:1; cursor:pointer; flex-shrink:0; }
+.chart-zoom-close-btn:hover{ color:var(--text); border-color:var(--text-dim); }
+#chart-zoom-toolbar-slot{ margin-top:10px; }
+#chart-zoom-toolbar-slot .chart-toolbar{ margin-bottom:0; }
+#chart-zoom-box{ margin-top:8px; height:min(68vh,560px); border:1px solid var(--border-soft); border-radius:10px; background:var(--bg-inset); }
 .chart-zoom-hint{ margin-top:8px; font-size:11px; color:var(--text-dim); text-align:center; }
 """
 
@@ -1868,196 +1861,286 @@ function widestLabelPx(strs, padPx){
   return w + (padPx||8);
 }
 
-// --- Click-to-expand / zoom for every chart -------------------------------
-// Every chart is rendered by calling one of the renderXChart(containerId, ...)
-// functions above, and those functions size themselves from whatever element
-// containerId points at (see chartSize()). That means the SAME render call
-// can be replayed into a different, larger container to get a bigger version
-// of the exact chart already on screen — no separate "zoom" chart type needed.
-// registerChart() remembers how to replay a chart (its render fn + args) keyed
-// by its normal container id, so the expand button can ask for a fresh, larger
-// render on demand rather than trying to CSS-scale the small original (which
-// would just blow up the same small SVG and blur it).
-const CHART_REGISTRY = {};
-function registerChart(containerId, title, renderFn, ...args){
-  CHART_REGISTRY[containerId] = { title, render: (targetId) => renderFn(targetId, ...args) };
-  renderFn(containerId, ...args);
-}
+// --- Windowed zoom/pan for every chart (v13) -------------------------------
+// v9-v11 zoomed by giving a chart more PIXELS (a wider canvas, same data, same
+// scale) — useful, but not what "zoom" means in the Garmin Connect app, where
+// pinching narrows the visible date range and BOTH axes rescale to what's
+// actually on screen. This is that: each chart owns a "view window" (a
+// start/end pair in data-index units — or elapsed-seconds units for the
+// interval chart), scroll/pinch narrows or widens that window around the
+// pointer, drag pans it once zoomed in, and every render recomputes the
+// x-scale AND the y-scale from only the points inside the window — so zooming
+// into three weeks of a six-month pace history doesn't just spread the same
+// flat line wider, it reveals the day-to-day swings that were compressed
+// against a full-range y-axis. Double-click/tap or the "Reset zoom" pill
+// snaps back to the full range.
+//
+// CHART_INSTANCES holds one live entry per chart container id: its current
+// view window, its data, and which render function draws it. registerZoomChart
+// is the entry point every chart (re-)registers through; it reuses the
+// existing instance (keeping the current zoom) when the SAME DOM node and the
+// SAME data array are being redrawn (e.g. a window resize), and starts a
+// fresh full-view instance when either the container is a brand new element
+// (e.g. the run-detail modal was reopened for a different run) or the data
+// reference changed (e.g. switching Long Run Splits tabs to a different run).
+const CHART_INSTANCES = {};
 
-function attachChartExpandButtons(root){
-  (root || document).querySelectorAll('.chart-box').forEach(box => {
-    if(box.id === 'chart-zoom-box') return; // the zoom viewer's own chart box
-    if(box.querySelector('.chart-expand-btn')) return; // already wired up
-    const svgDiv = box.querySelector('.svg-chart');
-    if(!svgDiv || !svgDiv.id) return;
+function ensureChartChrome(containerId){
+  const svgDiv = document.getElementById(containerId);
+  if(!svgDiv) return;
+  const box = svgDiv.closest('.chart-box');
+  if(!box || box.id === 'chart-zoom-box') return; // the zoom modal's own chart box gets no chrome of its own
+  if(!box.querySelector('.chart-expand-btn')){
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'chart-expand-btn';
-    btn.title = 'Expand & zoom';
-    btn.setAttribute('aria-label', 'Expand chart for a larger, zoomable view');
+    btn.title = 'Expand for a larger view';
+    btn.setAttribute('aria-label', 'Expand chart for a larger view');
     btn.innerHTML = '⤢';
-    btn.addEventListener('click', e => { e.stopPropagation(); openChartZoom(svgDiv.id); });
+    btn.addEventListener('click', e => { e.stopPropagation(); openChartZoom(containerId); });
     box.appendChild(btn);
-  });
+  }
+  const prevSib = box.previousElementSibling;
+  if(!prevSib || !prevSib.classList || !prevSib.classList.contains('chart-toolbar')){
+    const toolbar = document.createElement('div');
+    toolbar.className = 'chart-toolbar';
+    toolbar.innerHTML = `<span class="zoom-range" id="${containerId}-range"></span><button type="button" class="zoom-reset-btn" id="${containerId}-reset">Reset zoom</button>`;
+    box.parentNode.insertBefore(toolbar, box);
+    document.getElementById(containerId+'-reset').addEventListener('click', () => { const inst=CHART_INSTANCES[containerId]; if(inst) inst.reset(); });
+  }
 }
 
-// Zooming used to CSS-scale a fixed-size picture of the chart uniformly in
-// both directions — a blunt magnifying glass over the same pixels, aspect
-// ratio unchanged. Every chart already measures its own container's real
-// pixel size and draws to fit it (see chartSize() above), so instead of
-// scaling a picture, zooming here makes the chart itself wider and asks it
-// to redraw: bars/points/ticks get real extra room and gain actual detail
-// (closer-spaced labels resolve, bars separate) rather than the same shapes
-// blown up and blurred. The vertical axis is deliberately left alone —
-// height always matches the viewport — so the chart's aspect ratio stretches
-// wide as you zoom in, instead of the whole picture growing uniformly.
-let ZOOM = { scale:1, chartId:null };
-function chartZoomEls(){
-  return {
-    modal: document.getElementById('chart-zoom-modal'),
-    viewport: document.getElementById('chart-zoom-viewport'),
-    stage: document.getElementById('chart-zoom-stage'),
-    title: document.getElementById('chart-zoom-title'),
-    level: document.getElementById('chart-zoom-level'),
-  };
-}
-function clampZoomScale(s){ return Math.min(6, Math.max(1, s)); }
+// One zoom/pan engine shared by every chart. `container` is the actual
+// .svg-chart div the chart draws into and the element all gesture listeners
+// bind to — since that element's identity never changes across re-renders
+// (only its children get replaced), the listeners attached here stay valid
+// for the life of the chart, including while it's temporarily reparented into
+// the expand modal (see openChartZoom below).
+function makeZoomChart({containerId, container}){
+  let view = {start:0, end:1};
+  let dragging=false, dragStartX=0, dragStartView=null, pinch=null, raf=null, lastTapT=0;
 
-// Re-render is coalesced to one per animation frame so rapid wheel/pinch
-// input doesn't trigger a full chart rebuild (all points, all listeners) on
-// every event.
-let _zoomRenderScheduled = false;
-function scheduleZoomRerender(){
-  if(_zoomRenderScheduled) return;
-  _zoomRenderScheduled = true;
-  requestAnimationFrame(() => {
-    _zoomRenderScheduled = false;
-    const entry = CHART_REGISTRY[ZOOM.chartId];
-    if(!entry) return;
-    const container = document.getElementById('chart-zoom-target');
-    if(container) container.innerHTML = '';
-    entry.render('chart-zoom-target');
-  });
-}
-// anchor (optional): {anchorPx, frac} — keeps the same horizontal fraction of
-// the chart under anchorPx (a cursor position or pinch midpoint, relative to
-// the viewport) as the width changes, so zooming feels centered on where you
-// pointed rather than snapping back to the left edge.
-function applyZoom(anchor){
-  const {viewport, stage, level} = chartZoomEls();
-  const vpW = viewport.clientWidth || 1;
-  const targetW = Math.round(vpW * ZOOM.scale);
-  stage.style.width = targetW + 'px';
-  viewport.scrollLeft = anchor ? (anchor.frac*targetW - anchor.anchorPx) : 0;
-  level.textContent = Math.round(ZOOM.scale*100) + '%';
-  viewport.classList.toggle('pannable', ZOOM.scale > 1);
-  scheduleZoomRerender();
-}
-function resetZoom(){ ZOOM.scale=1; applyZoom(); }
-function zoomBy(factor, atVpX){
-  const {viewport} = chartZoomEls();
-  const rect = viewport.getBoundingClientRect();
-  const anchorPx = atVpX!=null ? atVpX : rect.width/2;
-  const oldW = Math.max(1, viewport.scrollWidth);
-  const frac = (viewport.scrollLeft + anchorPx) / oldW;
-  ZOOM.scale = clampZoomScale(ZOOM.scale*factor);
-  applyZoom({ anchorPx, frac });
-}
-function openChartZoom(chartId){
-  const entry = CHART_REGISTRY[chartId];
-  if(!entry) return;
-  const {modal, title} = chartZoomEls();
-  title.textContent = entry.title || '';
-  modal.style.display = 'flex';
-  document.body.style.overflow = 'hidden';
-  ZOOM = { scale:1, chartId };
-  // Wait for the modal to finish laying out (two frames, to be safe across
-  // browsers) so the viewport has its real size before applyZoom measures it.
-  requestAnimationFrame(() => requestAnimationFrame(() => applyZoom()));
-}
-function closeChartZoom(){
-  document.getElementById('chart-zoom-modal').style.display = 'none';
-  document.body.style.overflow = '';
-  ZOOM.chartId = null;
-}
-safe('chart zoom modal', function(){
-  const {modal, viewport} = chartZoomEls();
-  document.getElementById('chart-zoom-close').addEventListener('click', closeChartZoom);
-  document.getElementById('chart-zoom-in').addEventListener('click', () => zoomBy(1.5));
-  document.getElementById('chart-zoom-out').addEventListener('click', () => zoomBy(1/1.5));
-  document.getElementById('chart-zoom-reset').addEventListener('click', resetZoom);
-  modal.addEventListener('click', e => { if(e.target===modal) closeChartZoom(); });
-  document.addEventListener('keydown', e => { if(e.key==='Escape' && modal.style.display!=='none') closeChartZoom(); });
-  viewport.addEventListener('dblclick', resetZoom);
+  function self(){ return CHART_INSTANCES[containerId]; }
+  function domN(){ return Math.max(1, (self() && self().domainSize) || 1); }
+  function minW(){ const mw = self() && self().minWindow; return Math.min(domN(), Math.max(0.001, mw || 1)); }
+  function clampView(v){
+    let width = Math.max(minW(), Math.min(domN(), v.end-v.start));
+    let start=v.start, end=v.start+width;
+    if(start<0){ start=0; end=width; }
+    if(end>domN()){ end=domN(); start=end-width; }
+    return {start,end};
+  }
+  function plotGeom(){
+    const {w:W} = chartSize(container,720,300);
+    const M = container._plotMargins || {left:0,right:0};
+    return { plotW: Math.max(1,W-M.left-M.right), M };
+  }
+  function pxToIndex(px){
+    const {plotW,M} = plotGeom();
+    const frac = Math.max(0, Math.min(1, (px-M.left)/plotW));
+    return view.start + frac*(view.end-view.start);
+  }
+  function scheduleRender(){
+    if(raf) return;
+    raf = requestAnimationFrame(() => { raf=null; doRender(); });
+  }
+  function doRender(){
+    const inst = self();
+    if(!inst) return;
+    container.innerHTML='';
+    inst.renderFn(container, inst.data, view);
+    const zoomed = (view.end-view.start) < domN()-1e-6;
+    container.classList.toggle('zoomed', zoomed);
+    const rangeEl = document.getElementById(containerId+'-range');
+    const resetBtn = document.getElementById(containerId+'-reset');
+    if(rangeEl) rangeEl.textContent = inst.rangeFmt ? inst.rangeFmt(inst.data, view, zoomed) : '';
+    if(resetBtn) resetBtn.classList.toggle('show', zoomed);
+  }
+  function zoomBy(factor, atPx){
+    const centerIdx = atPx!=null ? pxToIndex(atPx) : (view.start+view.end)/2;
+    const newWidth = (view.end-view.start)*factor;
+    const leftFrac = (centerIdx-view.start)/((view.end-view.start)||1);
+    const start = centerIdx-leftFrac*newWidth;
+    view = clampView({start, end:start+newWidth});
+    scheduleRender();
+  }
+  function panByIndex(deltaIdx){ view = clampView({start:view.start+deltaIdx, end:view.end+deltaIdx}); scheduleRender(); }
+  function reset(){ view = {start:0, end:domN()}; scheduleRender(); }
+  function redraw(){ view = clampView(view); scheduleRender(); }
 
-  // Vertical wheel motion (a mouse wheel, or a trackpad's vertical two-finger
-  // scroll) zooms. Horizontal motion is left alone so a trackpad's horizontal
-  // swipe pans by scrolling the viewport natively — no custom code needed.
-  viewport.addEventListener('wheel', e => {
-    if(Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+  // Vertical wheel/trackpad motion zooms (matches the v9-v11 convention this
+  // dashboard already trained users on); horizontal motion pans once zoomed.
+  container.addEventListener('wheel', e => {
+    if(Math.abs(e.deltaY) <= Math.abs(e.deltaX)){
+      if(view.end-view.start < domN()-1e-6){
+        e.preventDefault();
+        const {plotW} = plotGeom();
+        panByIndex((e.deltaX/plotW)*(view.end-view.start));
+      }
+      return;
+    }
     e.preventDefault();
-    const rect = viewport.getBoundingClientRect();
-    zoomBy(Math.pow(1.0016, -e.deltaY), e.clientX-rect.left);
+    const rect = container.getBoundingClientRect();
+    zoomBy(Math.pow(1.0016, e.deltaY), e.clientX-rect.left);
   }, {passive:false});
 
-  // Click-drag panning for a plain mouse (trackpad swipes and touch already
-  // pan via the viewport's native horizontal scrolling).
-  let dragging=false, dragStartX=0, startScrollLeft=0;
-  viewport.addEventListener('mousedown', e => {
-    if(ZOOM.scale<=1) return;
-    dragging=true; dragStartX=e.clientX; startScrollLeft=viewport.scrollLeft;
-    viewport.classList.add('panning');
+  container.addEventListener('dblclick', reset);
+
+  container.addEventListener('mousedown', e => {
+    if(e.button!==0) return;
+    dragging=true; dragStartX=e.clientX; dragStartView={...view};
+    container.classList.add('panning');
   });
   window.addEventListener('mousemove', e => {
     if(!dragging) return;
-    viewport.scrollLeft = startScrollLeft - (e.clientX-dragStartX);
+    const {plotW} = plotGeom();
+    const deltaIdx = -((e.clientX-dragStartX)/plotW)*(dragStartView.end-dragStartView.start);
+    view = clampView({start:dragStartView.start+deltaIdx, end:dragStartView.end+deltaIdx});
+    scheduleRender();
   });
-  window.addEventListener('mouseup', () => { dragging=false; viewport.classList.remove('panning'); });
+  window.addEventListener('mouseup', () => { if(dragging){ dragging=false; container.classList.remove('panning'); } });
 
-  // Two-finger pinch zooms; a single finger pans natively via the viewport's
-  // own horizontal scrolling (touch-action:pan-x in the CSS above).
-  let pinch=null;
-  viewport.addEventListener('touchstart', e => {
+  // Two-finger pinch zooms, anchored at the pinch midpoint; a single finger
+  // drags to pan, and a quick double-tap resets — the same gestures as the
+  // Garmin Connect app's own chart zoom.
+  container.addEventListener('touchstart', e => {
     if(e.touches.length===2){
-      const [a,b]=e.touches;
-      const rect=viewport.getBoundingClientRect();
-      pinch={ dist:Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY), scale:ZOOM.scale, midX:(a.clientX+b.clientX)/2-rect.left };
-    } else {
-      pinch=null;
+      const [a,b]=e.touches, rect=container.getBoundingClientRect();
+      pinch = { dist:Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY), view:{...view}, midX:(a.clientX+b.clientX)/2-rect.left };
+      dragging=false;
+    } else if(e.touches.length===1){
+      const now=Date.now();
+      if(now-lastTapT<320){ reset(); lastTapT=0; return; }
+      lastTapT=now;
+      dragging=true; dragStartX=e.touches[0].clientX; dragStartView={...view};
     }
   }, {passive:true});
-  viewport.addEventListener('touchmove', e => {
-    if(!pinch || e.touches.length!==2) return;
-    e.preventDefault();
-    const [a,b]=e.touches;
-    const dist=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);
-    const oldW=Math.max(1, viewport.scrollWidth);
-    const frac=(viewport.scrollLeft + pinch.midX) / oldW;
-    ZOOM.scale=clampZoomScale(pinch.scale*(dist/pinch.dist));
-    applyZoom({ anchorPx: pinch.midX, frac });
+  container.addEventListener('touchmove', e => {
+    if(pinch && e.touches.length===2){
+      e.preventDefault();
+      const [a,b]=e.touches;
+      const dist=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);
+      const {plotW,M} = plotGeom();
+      const frac = Math.max(0, Math.min(1, (pinch.midX-M.left)/plotW));
+      const centerIdx = pinch.view.start + frac*(pinch.view.end-pinch.view.start);
+      const newWidth = (pinch.view.end-pinch.view.start)*(pinch.dist/dist);
+      const leftFrac = (centerIdx-pinch.view.start)/((pinch.view.end-pinch.view.start)||1);
+      const start = centerIdx-leftFrac*newWidth;
+      view = clampView({start, end:start+newWidth});
+      scheduleRender();
+    } else if(dragging && e.touches.length===1){
+      e.preventDefault();
+      const {plotW} = plotGeom();
+      const deltaIdx = -((e.touches[0].clientX-dragStartX)/plotW)*(dragStartView.end-dragStartView.start);
+      view = clampView({start:dragStartView.start+deltaIdx, end:dragStartView.end+deltaIdx});
+      scheduleRender();
+    }
   }, {passive:false});
-  viewport.addEventListener('touchend', () => { pinch=null; });
+  container.addEventListener('touchend', e => { if(e.touches.length<2) pinch=null; if(e.touches.length===0) dragging=false; });
+
+  return { containerId, container, reset, redraw, get view(){ return view; } };
+}
+
+// Every chart (re-)registers through here. `opts.data` is compared by
+// REFERENCE against what's already registered for this container id to
+// decide whether this is "the same chart, redraw it" (e.g. a resize — keep
+// the current zoom) or "genuinely different data" (e.g. a different run's
+// splits — reset to the full view). Callers that recompute a filtered/sorted
+// array on every call (the pace and series charts) cache that array once so
+// repeated registrations pass the SAME reference and don't spuriously reset —
+// see PACED_RUNS_ASC / HRV_PTS / VO2_PTS / EF_PTS below.
+function registerZoomChart(containerId, opts){
+  const container = document.getElementById(containerId);
+  if(!container) return null;
+  const prev = CHART_INSTANCES[containerId];
+  if(prev && prev.container === container){
+    const sameData = prev.data === opts.data;
+    Object.assign(prev, { title:opts.title, data:opts.data, domainSize:opts.domainSize, minWindow:opts.minWindow, renderFn:opts.render, rangeFmt:opts.rangeFmt });
+    ensureChartChrome(containerId);
+    sameData ? prev.redraw() : prev.reset();
+    return prev;
+  }
+  const inst = makeZoomChart({containerId, container});
+  Object.assign(inst, { title:opts.title, data:opts.data, domainSize:opts.domainSize, minWindow:opts.minWindow, renderFn:opts.render, rangeFmt:opts.rangeFmt });
+  CHART_INSTANCES[containerId] = inst;
+  ensureChartChrome(containerId);
+  inst.reset();
+  return inst;
+}
+
+// The ⤢ button no longer opens a copy of the chart at a bigger CSS scale —
+// it reparents the chart's OWN .svg-chart div (with its live zoom state and
+// listeners intact) into the modal's larger box, then moves it back on close.
+// Nothing is re-rendered from scratch and nothing needs to be kept in sync;
+// it's literally the same element, just temporarily somewhere bigger.
+let CHART_ZOOM_STATE = null;
+function openChartZoom(chartId){
+  const inst = CHART_INSTANCES[chartId];
+  const svgDiv = document.getElementById(chartId);
+  if(!inst || !svgDiv) return;
+  const originalBox = svgDiv.closest('.chart-box');
+  const toolbar = (originalBox && originalBox.previousElementSibling && originalBox.previousElementSibling.classList.contains('chart-toolbar')) ? originalBox.previousElementSibling : null;
+  const modal = document.getElementById('chart-zoom-modal');
+  document.getElementById('chart-zoom-title').textContent = inst.title || '';
+  CHART_ZOOM_STATE = {
+    chartId, svgDiv, svgParent: svgDiv.parentNode, svgNext: svgDiv.nextSibling,
+    toolbar, toolbarParent: toolbar ? toolbar.parentNode : null, toolbarNext: toolbar ? toolbar.nextSibling : null,
+  };
+  if(toolbar) document.getElementById('chart-zoom-toolbar-slot').appendChild(toolbar);
+  document.getElementById('chart-zoom-box').appendChild(svgDiv);
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  // Two frames so the modal has finished laying out (real size available)
+  // before the chart redraws to fit its new, larger box.
+  requestAnimationFrame(() => requestAnimationFrame(() => inst.redraw()));
+}
+function closeChartZoom(){
+  if(!CHART_ZOOM_STATE) return;
+  const {chartId, svgDiv, svgParent, svgNext, toolbar, toolbarParent, toolbarNext} = CHART_ZOOM_STATE;
+  if(svgParent) svgParent.insertBefore(svgDiv, svgNext);
+  if(toolbar && toolbarParent) toolbarParent.insertBefore(toolbar, toolbarNext);
+  document.getElementById('chart-zoom-modal').style.display = 'none';
+  document.body.style.overflow = '';
+  CHART_ZOOM_STATE = null;
+  const inst = CHART_INSTANCES[chartId];
+  if(inst) requestAnimationFrame(() => inst.redraw());
+}
+safe('chart zoom modal', function(){
+  document.getElementById('chart-zoom-close').addEventListener('click', closeChartZoom);
+  document.getElementById('chart-zoom-modal').addEventListener('click', e => { if(e.target.id==='chart-zoom-modal') closeChartZoom(); });
+  document.addEventListener('keydown', e => { if(e.key==='Escape' && CHART_ZOOM_STATE) closeChartZoom(); });
 });
 
-function renderVolumeChart(containerId, weekly){
-  const container=document.getElementById(containerId); container.innerHTML='';
+// Each renderXWindow(container, data, view) draws only the slice of `data`
+// inside `view` (a {start,end} pair of fractional indices), with the y-axis
+// rescaled to that slice's own min/max — the "genuinely zoomed" behavior
+// described above. `view.start`/`view.end` span the full [0, data.length-1]
+// range at rest, so these render exactly like the old un-windowed versions
+// when nothing is zoomed.
+function renderVolumeWindow(container, weekly, view){
   if(!weekly.length){ container.innerHTML="<p class='empty'>No weekly data yet.</p>"; return; }
   const {w:W,h:H}=chartSize(container,720,300), M={top:26,right:40,bottom:34,left:42};
+  container._plotMargins = M;
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
-  const maxMiles=Math.max(...weekly.map(w=>w.miles),1);
+  const n=weekly.length;
+  const lo=Math.max(0,Math.floor(view.start)), hi=Math.min(n-1,Math.ceil(view.end));
+  const visibleIdx=[]; for(let i=lo;i<=hi;i++) visibleIdx.push(i);
+  const maxMiles=Math.max(...visibleIdx.map(i=>weekly[i].miles),1);
   const yTicks=niceTicks(0,maxMiles,5), yMax=yTicks[yTicks.length-1];
   const yScale=v=>M.top+plotH-(v/yMax)*plotH;
-  const runsMax=Math.max(6,...weekly.map(w=>w.runs));
+  const runsMax=Math.max(6,...visibleIdx.map(i=>weekly[i].runs));
   const y1Scale=v=>M.top+plotH-(v/runsMax)*plotH;
-  const n=weekly.length, bandW=plotW/n, xCenter=i=>M.left+bandW*i+bandW/2;
-  const volLabels=labelIndices(n, plotW, widestLabelPx(weekly.map(w=>w.label)));
+  const bandW=plotW/(view.end-view.start), xCenter=i=>M.left+(i-view.start)*bandW+bandW/2;
+  const volLabels=labelIndices(visibleIdx.length, plotW, widestLabelPx(visibleIdx.map(i=>weekly[i].label)));
   yTicks.forEach(t=>{ svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:yScale(t),y2:yScale(t)})); const lbl=el('text',{x:M.left-8,y:yScale(t)+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
   const yTitle=el('text',{x:10,y:12}); yTitle.textContent='miles'; svg.appendChild(yTitle);
   const y1Title=el('text',{x:W-M.right,y:12,'text-anchor':'end'}); y1Title.textContent='runs/wk'; svg.appendChild(y1Title);
-  const milesBarW=bandW*0.44, lrBarW=bandW*0.24;
-  weekly.forEach((w,i)=>{
-    const cx=xCenter(i), mBarX=cx-milesBarW-2, mBarY=yScale(w.miles);
+  const milesBarW=Math.min(bandW*0.44,70), lrBarW=Math.min(bandW*0.24,36);
+  const clipId='vol-clip-'+Math.random().toString(36).slice(2);
+  const clip=el('clipPath',{id:clipId}); clip.appendChild(el('rect',{x:M.left,y:M.top,width:plotW,height:plotH})); svg.appendChild(clip);
+  visibleIdx.forEach((i,k)=>{
+    const w=weekly[i], cx=xCenter(i), mBarX=cx-milesBarW-2, mBarY=yScale(w.miles);
     const mBar=el('rect',{class:'data-point',x:mBarX,y:mBarY,width:milesBarW,height:(M.top+plotH)-mBarY,fill:'#e3a857',rx:2});
     mBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Miles: <b>${w.miles.toFixed(1)}</b></div><div class="tt-row">Runs: <b>${w.runs}</b></div>${w.longRunMiles?`<div class="tt-row">Long run: <b>${w.longRunMiles.toFixed(1)}mi</b></div>`:''}`));
     mBar.addEventListener('mousemove',positionTooltip); mBar.addEventListener('mouseleave',hideTooltip);
@@ -2069,32 +2152,41 @@ function renderVolumeChart(containerId, weekly){
       lrBar.addEventListener('mousemove',positionTooltip); lrBar.addEventListener('mouseleave',hideTooltip);
       svg.appendChild(lrBar);
     }
-    if(volLabels.has(i)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.label; svg.appendChild(xl); }
+    if(volLabels.has(k)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.label; svg.appendChild(xl); }
   });
-  let linePath=''; weekly.forEach((w,i)=>{ const x=xCenter(i), y=y1Scale(w.runs); linePath+=(i===0?'M':'L')+x+','+y+' '; });
-  svg.appendChild(el('path',{d:linePath.trim(),fill:'none',stroke:'#5fa8a0','stroke-width':2}));
-  weekly.forEach((w,i)=>{ const c=el('circle',{class:'data-point',cx:xCenter(i),cy:y1Scale(w.runs),r:3.5,fill:'#5fa8a0'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Runs: <b>${w.runs}</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  let linePath=''; visibleIdx.forEach((i,k)=>{ const x=xCenter(i), y=y1Scale(weekly[i].runs); linePath+=(k===0?'M':'L')+x+','+y+' '; });
+  svg.appendChild(el('path',{d:linePath.trim(),fill:'none',stroke:'#5fa8a0','stroke-width':2,'clip-path':`url(#${clipId})`}));
+  visibleIdx.forEach(i=>{ const w=weekly[i]; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:y1Scale(w.runs),r:3.5,fill:'#5fa8a0'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Runs: <b>${w.runs}</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
   container.appendChild(svg);
 }
+function registerVolumeChart(containerId, title, weekly){
+  registerZoomChart(containerId, {
+    title, data:weekly, domainSize:weekly.length, minWindow:Math.min(weekly.length,4), render:renderVolumeWindow,
+    rangeFmt:(data,view,zoomed)=>{ if(!data.length) return ''; const lo=Math.max(0,Math.round(view.start)), hi=Math.min(data.length-1,Math.round(view.end)); return zoomed ? `${data[lo].label} – ${data[hi].label}` : `Full history · ${data.length} weeks`; }
+  });
+}
 
-function renderPlanChart(containerId, planWeeks){
-  const container=document.getElementById(containerId); container.innerHTML='';
+function renderPlanWindow(container, planWeeks, view){
   if(!planWeeks || !planWeeks.length){ container.innerHTML="<p class='empty'>No training plan loaded.</p>"; return; }
   const {w:W,h:H}=chartSize(container,720,300), M={top:26,right:20,bottom:34,left:42};
+  container._plotMargins = M;
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
-  const maxMiles=Math.max(...planWeeks.map(w=>Math.max(w.plannedMi||0, w.actualMi||0)),1);
+  const n=planWeeks.length;
+  const lo=Math.max(0,Math.floor(view.start)), hi=Math.min(n-1,Math.ceil(view.end));
+  const visibleIdx=[]; for(let i=lo;i<=hi;i++) visibleIdx.push(i);
+  const maxMiles=Math.max(...visibleIdx.map(i=>Math.max(planWeeks[i].plannedMi||0, planWeeks[i].actualMi||0)),1);
   const yTicks=niceTicks(0,maxMiles,5), yMax=yTicks[yTicks.length-1];
   const yScale=v=>M.top+plotH-(v/yMax)*plotH;
-  const n=planWeeks.length, bandW=plotW/n, xCenter=i=>M.left+bandW*i+bandW/2;
-  const wkLabels=labelIndices(n, plotW, widestLabelPx(planWeeks.map(w=>w.weekLabel)));
+  const bandW=plotW/(view.end-view.start), xCenter=i=>M.left+(i-view.start)*bandW+bandW/2;
+  const wkLabels=labelIndices(visibleIdx.length, plotW, widestLabelPx(visibleIdx.map(i=>planWeeks[i].weekLabel)));
   yTicks.forEach(t=>{ svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:yScale(t),y2:yScale(t)})); const lbl=el('text',{x:M.left-8,y:yScale(t)+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
   const yTitle=el('text',{x:10,y:12}); yTitle.textContent='miles'; svg.appendChild(yTitle);
-  const plannedBarW=bandW*0.34, actualBarW=bandW*0.34;
-  planWeeks.forEach((w,i)=>{
-    const cx=xCenter(i);
+  const plannedBarW=Math.min(bandW*0.34,60), actualBarW=Math.min(bandW*0.34,60);
+  visibleIdx.forEach((i,k)=>{
+    const w=planWeeks[i], cx=xCenter(i);
     const pBarX=cx-plannedBarW-2, pBarY=yScale(w.plannedMi||0);
     const pBar=el('rect',{class:'data-point',x:pBarX,y:pBarY,width:plannedBarW,height:(M.top+plotH)-pBarY,fill:'#8b95a1',rx:2});
     pBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.weekLabel}</div><div class="tt-row">${w.phase}</div><div class="tt-row">Planned: <b>${(w.plannedMi||0).toFixed(1)}mi</b></div>`));
@@ -2107,109 +2199,135 @@ function renderPlanChart(containerId, planWeeks){
       aBar.addEventListener('mousemove',positionTooltip); aBar.addEventListener('mouseleave',hideTooltip);
       svg.appendChild(aBar);
     }
-    if(wkLabels.has(i)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.weekLabel; svg.appendChild(xl); }
+    if(wkLabels.has(k)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.weekLabel; svg.appendChild(xl); }
   });
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
   container.appendChild(svg);
 }
+function registerPlanChart(containerId, title, planWeeks){
+  registerZoomChart(containerId, {
+    title, data:planWeeks, domainSize:planWeeks.length, minWindow:Math.min(planWeeks.length,4), render:renderPlanWindow,
+    rangeFmt:(data,view,zoomed)=>{ if(!data.length) return ''; const lo=Math.max(0,Math.round(view.start)), hi=Math.min(data.length-1,Math.round(view.end)); return zoomed ? `${data[lo].weekLabel} – ${data[hi].weekLabel}` : `Full plan · ${data.length} weeks`; }
+  });
+}
 
-function renderPaceChart(containerId, runsAsc){
-  const container=document.getElementById(containerId); container.innerHTML='';
-  const runs=runsAsc.filter(r=>r.paceMinMi);
+function renderPaceWindow(container, runs, view){
   if(runs.length<2){ container.innerHTML="<p class='empty'>Not enough paced runs yet.</p>"; return; }
   const {w:W,h:H}=chartSize(container,720,300), M={top:26,right:20,bottom:34,left:50};
+  container._plotMargins = M;
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
+  const n=runs.length;
+  const lo=Math.max(0,Math.floor(view.start)), hi=Math.min(n-1,Math.ceil(view.end));
+  const visibleIdx=[]; for(let i=lo;i<=hi;i++) visibleIdx.push(i);
+  // The rolling average is computed over the FULL series (up to 4 runs before
+  // each point) so the trend line at the left edge of a zoomed window still
+  // reflects real prior history instead of restarting from whatever's on screen.
   const rolling=runs.map((r,i)=>{ const w=runs.slice(Math.max(0,i-4),i+1); return w.reduce((s,x)=>s+x.paceMinMi,0)/w.length; });
-  const paces=runs.map(r=>r.paceMinMi);
+  const paces=visibleIdx.map(i=>runs[i].paceMinMi);
   const minP=Math.min(...paces)-0.6, maxP=Math.max(...paces)+0.6;
   const yTicks=niceTicks(minP,maxP,5);
   const yScale=v=>M.top+((v-yTicks[0])/(yTicks[yTicks.length-1]-yTicks[0]))*plotH;
-  const n=runs.length, xScale=i=>n<=1?M.left+plotW/2:M.left+(i/(n-1))*plotW;
+  const xScale=i=>M.left+((i-view.start)/(view.end-view.start))*plotW;
   yTicks.forEach(t=>{ const y=yScale(t); svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-8,y:y+3,'text-anchor':'end'}); lbl.textContent=paceStr(t); svg.appendChild(lbl); });
   const yTitle=el('text',{x:6,y:12}); yTitle.textContent='min/mile'; svg.appendChild(yTitle);
-  const paceLabels=labelIndices(n, plotW, widestLabelPx(runs.map(r=>r.dateLabel)));
-  runs.forEach((r,i)=>{ if(paceLabels.has(i)){ const xl=el('text',{x:xScale(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=r.dateLabel; svg.appendChild(xl); } });
-  let path=''; runs.forEach((r,i)=>{ path+=(i===0?'M':'L')+xScale(i)+','+yScale(rolling[i])+' '; });
-  svg.appendChild(el('path',{d:path.trim(),fill:'none',stroke:'#e7e9ec','stroke-width':1.5,'stroke-dasharray':'4,3'}));
-  runs.forEach((r,i)=>{ const c=el('circle',{class:'data-point',cx:xScale(i),cy:yScale(r.paceMinMi),r:5,fill:TYPE_COLORS[r.type]||'#8b95a1'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${r.name}</div><div class="tt-row">${fmtDate(r.date)} · ${r.type}</div><div class="tt-row">Pace: <b>${paceStr(r.paceMinMi)}/mi</b></div><div class="tt-row">Dist: <b>${r.distMi.toFixed(1)}mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  const paceLabels=labelIndices(visibleIdx.length, plotW, widestLabelPx(visibleIdx.map(i=>runs[i].dateLabel)));
+  visibleIdx.forEach((i,k)=>{ if(paceLabels.has(k)){ const xl=el('text',{x:xScale(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=runs[i].dateLabel; svg.appendChild(xl); } });
+  const clipId='pace-clip-'+Math.random().toString(36).slice(2);
+  const clip=el('clipPath',{id:clipId}); clip.appendChild(el('rect',{x:M.left,y:M.top,width:plotW,height:plotH})); svg.appendChild(clip);
+  let path=''; visibleIdx.forEach((i,k)=>{ path+=(k===0?'M':'L')+xScale(i)+','+yScale(rolling[i])+' '; });
+  svg.appendChild(el('path',{d:path.trim(),fill:'none',stroke:'#e7e9ec','stroke-width':1.5,'stroke-dasharray':'4,3','clip-path':`url(#${clipId})`}));
+  visibleIdx.forEach(i=>{ const r=runs[i]; const c=el('circle',{class:'data-point',cx:xScale(i),cy:yScale(r.paceMinMi),r:5,fill:TYPE_COLORS[r.type]||'#8b95a1'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${r.name}</div><div class="tt-row">${fmtDate(r.date)} · ${r.type}</div><div class="tt-row">Pace: <b>${paceStr(r.paceMinMi)}/mi</b></div><div class="tt-row">Dist: <b>${r.distMi.toFixed(1)}mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
   container.appendChild(svg);
 }
+function registerPaceChart(containerId, title, pacedRuns){
+  registerZoomChart(containerId, {
+    title, data:pacedRuns, domainSize:pacedRuns.length, minWindow:Math.min(pacedRuns.length,5), render:renderPaceWindow,
+    rangeFmt:(data,view,zoomed)=>{ if(!data.length) return ''; const lo=Math.max(0,Math.round(view.start)), hi=Math.min(data.length-1,Math.round(view.end)); return zoomed ? `${fmtDate(data[lo].date)} – ${fmtDate(data[hi].date)} · ${hi-lo+1} runs` : `Full history · ${data.length} runs`; }
+  });
+}
 
-function renderSeriesChart(containerId, series, valueKey, color){
-  const container=document.getElementById(containerId); container.innerHTML='';
-  const pts=series.filter(p=>typeof p[valueKey]==='number');
+function renderSeriesWindow(container, pts, view, valueKey, color){
   if(pts.length<2){ container.innerHTML="<p class='empty'>Not enough data yet.</p>"; return; }
   const {w:W,h:H}=chartSize(container,420,190), M={top:12,right:12,bottom:26,left:32};
+  container._plotMargins = M;
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
-  const vals=pts.map(p=>p[valueKey]);
+  const n=pts.length;
+  const lo=Math.max(0,Math.floor(view.start)), hi=Math.min(n-1,Math.ceil(view.end));
+  const visibleIdx=[]; for(let i=lo;i<=hi;i++) visibleIdx.push(i);
+  const vals=visibleIdx.map(i=>pts[i][valueKey]);
   const yTicks=niceTicks(Math.min(...vals)-1,Math.max(...vals)+1,4);
   const yMin=yTicks[0], yMax=yTicks[yTicks.length-1];
   const yScale=v=>M.top+plotH-((v-yMin)/(yMax-yMin))*plotH;
-  const n=pts.length, xScale=i=>n<=1?M.left+plotW/2:M.left+(i/(n-1))*plotW;
+  const xScale=i=>M.left+((i-view.start)/(view.end-view.start))*plotW;
   yTicks.forEach(t=>{ const y=yScale(t); svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:y,y2:y})); const lbl=el('text',{x:M.left-6,y:y+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
-  const seriesLabels=labelIndices(n, plotW, widestLabelPx(pts.map(p=>fmtDate(p.date))));
-  pts.forEach((p,i)=>{ if(seriesLabels.has(i)){ const xl=el('text',{x:xScale(i),y:H-M.bottom+14,'text-anchor':'middle'}); xl.textContent=fmtDate(p.date); svg.appendChild(xl); } });
+  const seriesLabels=labelIndices(visibleIdx.length, plotW, widestLabelPx(visibleIdx.map(i=>fmtDate(pts[i].date))));
+  visibleIdx.forEach((i,k)=>{ if(seriesLabels.has(k)){ const xl=el('text',{x:xScale(i),y:H-M.bottom+14,'text-anchor':'middle'}); xl.textContent=fmtDate(pts[i].date); svg.appendChild(xl); } });
+  const clipId='series-clip-'+Math.random().toString(36).slice(2);
+  const clip=el('clipPath',{id:clipId}); clip.appendChild(el('rect',{x:M.left,y:M.top,width:plotW,height:plotH})); svg.appendChild(clip);
   let linePath='', areaPath='';
-  pts.forEach((p,i)=>{ const x=xScale(i), y=yScale(p[valueKey]); linePath+=(i===0?'M':'L')+x+','+y+' '; areaPath+=(i===0?'M':'L')+x+','+y+' '; });
-  areaPath+=`L${xScale(n-1)},${M.top+plotH} L${xScale(0)},${M.top+plotH} Z`;
-  svg.appendChild(el('path',{d:areaPath,fill:color+'22',stroke:'none'}));
-  svg.appendChild(el('path',{d:linePath.trim(),fill:'none',stroke:color,'stroke-width':2}));
-  pts.forEach((p,i)=>{ const c=el('circle',{class:'data-point',cx:xScale(i),cy:yScale(p[valueKey]),r:3,fill:color,opacity:0.9}); const extra = p.status? `<div class="tt-row">${p.status}</div>` : ''; c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${fmtDate(p.date)}</div><div class="tt-row">${p[valueKey]}</div>${extra}`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  visibleIdx.forEach((i,k)=>{ const x=xScale(i), y=yScale(pts[i][valueKey]); linePath+=(k===0?'M':'L')+x+','+y+' '; areaPath+=(k===0?'M':'L')+x+','+y+' '; });
+  areaPath+=`L${xScale(visibleIdx[visibleIdx.length-1])},${M.top+plotH} L${xScale(visibleIdx[0])},${M.top+plotH} Z`;
+  svg.appendChild(el('path',{d:areaPath,fill:color+'22',stroke:'none','clip-path':`url(#${clipId})`}));
+  svg.appendChild(el('path',{d:linePath.trim(),fill:'none',stroke:color,'stroke-width':2,'clip-path':`url(#${clipId})`}));
+  visibleIdx.forEach(i=>{ const p=pts[i]; const c=el('circle',{class:'data-point',cx:xScale(i),cy:yScale(p[valueKey]),r:3,fill:color,opacity:0.9}); const extra = p.status? `<div class="tt-row">${p.status}</div>` : ''; c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${fmtDate(p.date)}</div><div class="tt-row">${p[valueKey]}</div>${extra}`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
   container.appendChild(svg);
 }
+function registerSeriesChart(containerId, title, pts, valueKey, color){
+  registerZoomChart(containerId, {
+    title, data:pts, domainSize:pts.length, minWindow:Math.min(pts.length,5),
+    render:(container,data,view)=>renderSeriesWindow(container,data,view,valueKey,color),
+    rangeFmt:(data,view,zoomed)=>{ if(!data.length) return ''; const lo=Math.max(0,Math.round(view.start)), hi=Math.min(data.length-1,Math.round(view.end)); return zoomed ? `${fmtDate(data[lo].date)} – ${fmtDate(data[hi].date)}` : `Full history · ${data.length} points`; }
+  });
+}
 
-function renderSplitsChart(containerId, splits, legendId, elevProfile, mileBased){
+function renderSplitsWindow(container, splits, view, legendId, elevProfile, mileBased){
   if(mileBased===undefined) mileBased=true; // older cached data with no flag — assume the common case
-  const container=document.getElementById(containerId); container.innerHTML='';
   if(!splits.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; if(legendId){ const lg=document.getElementById(legendId); if(lg) lg.innerHTML=''; } return; }
   const {w:W,h:H}=chartSize(container,720,320), M={top:28,right:20,bottom:34,left:50};
+  container._plotMargins = M;
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
   const n=splits.length;
   const labelWord = mileBased ? 'Mile' : 'Lap';
   // Each split's REAL distance (falling back to 1mi/lap if Garmin didn't return
-  // one) rather than assuming every lap is exactly one mile wide. That fallback
-  // assumption used to be baked into distScale itself — harmless for real
-  // per-mile autolaps (each lap really is ~1mi), but for a structured workout
-  // (interval reps + recovery jogs of very different lengths) it drew every lap
-  // as an equal-width "mile," which is exactly what mislabeled a 400m rep as a
-  // finished mile. distScale/xCenter now work off actual cumulative distance,
-  // so a short rep gets a proportionally narrow slice and a long recovery jog
-  // gets a proportionally wide one — correct either way, not just for miles.
+  // one) rather than assuming every lap is exactly one mile wide — see the v10
+  // changelog. cum[] is the FULL run's cumulative distance at each split
+  // boundary; distScale below maps only the currently-visible WINDOW of that
+  // distance range to the plot width, so zooming into a few splits spreads
+  // just their distance across the full chart instead of leaving them
+  // compressed against the whole run's span.
   const lapDist = splits.map(s=>(s.distMi!=null && s.distMi>0) ? s.distMi : 1);
   const cum=[0]; lapDist.forEach(d=>cum.push(cum[cum.length-1]+d));
-  const totalDist = cum[n] || n;
-  const distScale=d=>M.left+(Math.min(Math.max(d,0),totalDist)/totalDist)*plotW;
+
+  const lo=Math.max(0,Math.floor(view.start)), hi=Math.min(n-1,Math.ceil(view.end));
+  const visibleIdx=[]; for(let i=lo;i<=hi;i++) visibleIdx.push(i);
+  const winStartDist=cum[lo], winEndDist=cum[hi+1], winSpan=Math.max(winEndDist-winStartDist,0.001);
+  const distScale=d=>M.left+((Math.min(Math.max(d,winStartDist),winEndDist)-winStartDist)/winSpan)*plotW;
   const xCenter=i=>distScale((cum[i]+cum[i+1])/2);
-  // Label spacing measured off each split's REAL x position (not an assumed
-  // even index-spacing) since splits are no longer necessarily equal-width —
-  // a run with several short, tightly-clustered reps needs fewer visible
-  // labels than its raw split count would suggest under an even-spacing guess.
-  // A lap's "mile" field is either a bare number (a real mile-based split) or
-  // a self-describing string like "Interval 3" (v11's structured-workout
-  // labeling) — the latter reads fine on its own and doesn't want a "Lap "
-  // prefix stuck in front of it.
+
   const isSemanticLabel = s => !/^[0-9.]+$/.test(String(s.mile));
-  const splitLabelMinGap = widestLabelPx(splits.map(s=>isSemanticLabel(s) ? s.mile : labelWord.slice(0,mileBased?2:3)+' '+s.mile));
+  const splitLabelMinGap = widestLabelPx(visibleIdx.map(i=>{ const s=splits[i]; return isSemanticLabel(s) ? s.mile : labelWord.slice(0,mileBased?2:3)+' '+s.mile; }));
   const labelIdx=[]; let lastLabelX=-Infinity;
-  for(let i=0;i<n;i++){ const x=xCenter(i); if(x-lastLabelX>=splitLabelMinGap){ labelIdx.push(i); lastLabelX=x; } }
-  if(labelIdx[labelIdx.length-1]!==n-1){
-    const lastX=xCenter(n-1);
-    if(lastX-lastLabelX>=splitLabelMinGap) labelIdx.push(n-1); else labelIdx[labelIdx.length-1]=n-1;
+  visibleIdx.forEach(i=>{ const x=xCenter(i); if(x-lastLabelX>=splitLabelMinGap){ labelIdx.push(i); lastLabelX=x; } });
+  if(visibleIdx.length){
+    const lastI=visibleIdx[visibleIdx.length-1];
+    if(labelIdx[labelIdx.length-1]!==lastI){
+      const lastX=xCenter(lastI);
+      if(lastX-lastLabelX>=splitLabelMinGap) labelIdx.push(lastI); else if(labelIdx.length) labelIdx[labelIdx.length-1]=lastI; else labelIdx.push(lastI);
+    }
   }
   const mileLabels=new Set(labelIdx);
-  const paces=splits.map(s=>s.pace).filter(p=>p>0);
-  const paceMin=Math.min(...paces)-0.4, paceMax=Math.max(...paces)+0.4;
-  const paceTop=M.top, paceBottom=M.top+plotH;
-  const yPace=v=>paceTop+((v-paceMin)/(paceMax-paceMin))*(paceBottom-paceTop);
-  const hrs=splits.map(s=>s.avgHr).filter(h=>h);
+  const paces=visibleIdx.map(i=>splits[i].pace).filter(p=>p>0);
+  const paceMin=(paces.length?Math.min(...paces):0)-0.4, paceMax=(paces.length?Math.max(...paces):1)+0.4;
+  const yPace=v=>M.top+((v-paceMin)/(paceMax-paceMin))*plotH;
+  const hrs=visibleIdx.map(i=>splits[i].avgHr).filter(h=>h);
   const hrTicks = hrs.length ? niceTicks(Math.min(...hrs)-5,Math.max(...hrs)+5,4) : [0,1];
   const hrMin=hrTicks[0], hrMax=hrTicks[hrTicks.length-1];
   const yHr=v=>M.top+plotH-((v-hrMin)/(hrMax-hrMin))*plotH;
@@ -2220,45 +2338,51 @@ function renderSplitsChart(containerId, splits, legendId, elevProfile, mileBased
   const yTitle=el('text',{x:6,y:12}); yTitle.textContent='min/mi'; svg.appendChild(yTitle);
   const y1Title=el('text',{x:W-M.right,y:12,'text-anchor':'end'}); y1Title.textContent='bpm'; svg.appendChild(y1Title);
 
+  const clipId='splits-clip-'+Math.random().toString(36).slice(2);
+  const clip=el('clipPath',{id:clipId}); clip.appendChild(el('rect',{x:M.left,y:M.top,width:plotW,height:plotH})); svg.appendChild(clip);
+
   // ---- Elevation: a sub-mile altitude trace when Garmin returned one for this run,
-  // a per-mile gain line otherwise (same shape as before, just filled instead of
-  // barred). Either way it's drawn first so pace/HR sit visually on top of it.
+  // a per-mile gain line otherwise. Either way it's drawn first so pace/HR sit
+  // visually on top of it, and rescaled to just the points inside the window.
   const elevColor='#7c8a9e';
   const hasProfile = Array.isArray(elevProfile) && elevProfile.length>=6;
   let elevPts;
   if(hasProfile){
-    const alts=elevProfile.map(p=>p.elevFt);
+    const visProfile = elevProfile.filter(p=>p.distMi>=winStartDist-0.001 && p.distMi<=winEndDist+0.001);
+    const usable = visProfile.length>=2 ? visProfile : elevProfile;
+    const alts=usable.map(p=>p.elevFt);
     const altMin=Math.min(...alts), altMax=Math.max(...alts), range=(altMax-altMin)||1;
-    elevPts = elevProfile.map(p=>[distScale(p.distMi), baseline-((p.elevFt-altMin)/range)*elevCapPx]);
+    elevPts = usable.map(p=>[distScale(p.distMi), baseline-((p.elevFt-altMin)/range)*elevCapPx]);
   } else {
-    const maxGain=Math.max(...splits.map(s=>s.elevGainFt||0),1);
-    elevPts = splits.map((s,i)=>[xCenter(i), baseline-((s.elevGainFt||0)/maxGain)*elevCapPx]);
+    const maxGain=Math.max(...visibleIdx.map(i=>splits[i].elevGainFt||0),1);
+    elevPts = visibleIdx.map(i=>[xCenter(i), baseline-((splits[i].elevGainFt||0)/maxGain)*elevCapPx]);
   }
-  const elevLine = elevPts.reduce((d,p,i)=>d+(i===0?'M':'L')+p[0]+','+p[1]+' ','');
-  const elevArea = elevLine + `L${elevPts[elevPts.length-1][0]},${baseline} L${elevPts[0][0]},${baseline} Z`;
-  svg.appendChild(el('path',{d:elevArea, fill:elevColor+'2e', stroke:'none'}));
-  svg.appendChild(el('path',{d:elevLine, fill:'none', stroke:elevColor, 'stroke-width':hasProfile?1.3:1.5, 'stroke-linejoin':'round'}));
+  if(elevPts.length){
+    const elevLine = elevPts.reduce((d,p,i)=>d+(i===0?'M':'L')+p[0]+','+p[1]+' ','');
+    const elevArea = elevLine + `L${elevPts[elevPts.length-1][0]},${baseline} L${elevPts[0][0]},${baseline} Z`;
+    svg.appendChild(el('path',{d:elevArea, fill:elevColor+'2e', stroke:'none', 'clip-path':`url(#${clipId})`}));
+    svg.appendChild(el('path',{d:elevLine, fill:'none', stroke:elevColor, 'stroke-width':hasProfile?1.3:1.5, 'stroke-linejoin':'round', 'clip-path':`url(#${clipId})`}));
+  }
 
-  // One hover target + one x-axis label per split regardless of which elevation
-  // resolution is showing — the tooltip always reports that split's actual gain.
-  // Each split's tooltip title includes its real distance for a "Lap" (not a
-  // "Mile") since "Lap 3" alone doesn't tell you it was a 0.52mi rep.
+  // One hover target + one x-axis label per visible split. Each split's
+  // tooltip title includes its real distance for a "Lap" (not a "Mile") since
+  // "Lap 3" alone doesn't tell you it was a 0.52mi rep.
   const splitTitle = s => { const word = isSemanticLabel(s) ? s.mile : `${labelWord} ${s.mile}`; return mileBased ? word : `${word}${s.distMi!=null?` · ${s.distMi.toFixed(2)}mi`:''}`; };
-  splits.forEach((s,i)=>{
-    const x0=distScale(cum[i]), x1=distScale(cum[i+1]);
+  visibleIdx.forEach(i=>{
+    const s=splits[i], x0=distScale(cum[i]), x1=distScale(cum[i+1]);
     const hit=el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,1),height:plotH,fill:'transparent'});
     hit.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`));
     hit.addEventListener('mousemove',positionTooltip); hit.addEventListener('mouseleave',hideTooltip);
     svg.appendChild(hit);
     if(mileLabels.has(i)){ const xl=el('text',{x:xCenter(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent = isSemanticLabel(s) ? s.mile : (mileBased?'Mi ':'Lap ')+s.mile; svg.appendChild(xl); }
   });
-  let pacePath=''; splits.forEach((s,i)=>{ pacePath+=(i===0?'M':'L')+xCenter(i)+','+yPace(s.pace)+' '; });
-  svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2.5}));
-  splits.forEach((s,i)=>{ const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yPace(s.pace),r:4.5,fill:'#e3a857'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Pace: <b>${paceStr(s.pace)}/mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  let pacePath=''; visibleIdx.forEach((i,k)=>{ pacePath+=(k===0?'M':'L')+xCenter(i)+','+yPace(splits[i].pace)+' '; });
+  svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2.5,'clip-path':`url(#${clipId})`}));
+  visibleIdx.forEach(i=>{ const s=splits[i]; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yPace(s.pace),r:4.5,fill:'#e3a857'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Pace: <b>${paceStr(s.pace)}/mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   if(hrs.length){
-    let hrPath=''; splits.forEach((s,i)=>{ hrPath+=(i===0?'M':'L')+xCenter(i)+','+yHr(s.avgHr||hrMin)+' '; });
-    svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#c1614a','stroke-width':2.5}));
-    splits.forEach((s,i)=>{ if(!s.avgHr) return; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yHr(s.avgHr),r:4.5,fill:'#c1614a'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Avg HR: <b>${s.avgHr} bpm</b></div>${s.maxHr?`<div class="tt-row">Max HR: <b>${s.maxHr} bpm</b></div>`:''}`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+    let hrPath=''; visibleIdx.forEach((i,k)=>{ hrPath+=(k===0?'M':'L')+xCenter(i)+','+yHr(splits[i].avgHr||hrMin)+' '; });
+    svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#c1614a','stroke-width':2.5,'clip-path':`url(#${clipId})`}));
+    visibleIdx.forEach(i=>{ const s=splits[i]; if(!s.avgHr) return; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yHr(s.avgHr),r:4.5,fill:'#c1614a'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Avg HR: <b>${s.avgHr} bpm</b></div>${s.maxHr?`<div class="tt-row">Max HR: <b>${s.maxHr} bpm</b></div>`:''}`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   }
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
@@ -2296,29 +2420,36 @@ function fmtElapsed(sec){
   const m = Math.floor(sec/60), s = sec%60;
   return `${m}:${s.toString().padStart(2,'0')}`;
 }
-function renderIntervalTimeChart(containerId, timeSeries, legendId){
-  const container=document.getElementById(containerId); container.innerHTML='';
+function renderIntervalTimeWindow(container, timeSeries, view, legendId){
   const bands = timeSeries && timeSeries.bands, fine = timeSeries && timeSeries.fine;
   if(!bands || !bands.length || !fine || !fine.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; if(legendId){ const lg=document.getElementById(legendId); if(lg) lg.innerHTML=''; } return; }
   const {w:W,h:H}=chartSize(container,760,320), M={top:30,right:20,bottom:34,left:50};
+  container._plotMargins = M;
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
   const totalTime = bands[bands.length-1].end;
-  const xScale = t => M.left + (Math.min(Math.max(t,0),totalTime)/totalTime)*plotW;
+  const winStart=Math.max(0,view.start), winEnd=Math.min(totalTime,view.end), winSpan=Math.max(winEnd-winStart,0.001);
+  const xScale = t => M.left + ((Math.min(Math.max(t,winStart),winEnd)-winStart)/winSpan)*plotW;
 
-  const paces = fine.map(p=>p.pace).filter(p=>p>0);
-  const paceMin=Math.min(...paces)-0.4, paceMax=Math.max(...paces)+0.4;
+  const visFine = fine.filter(p=>p.t>=winStart-0.001 && p.t<=winEnd+0.001);
+  const finePts = visFine.length>=2 ? visFine : fine;
+  const paces = finePts.map(p=>p.pace).filter(p=>p>0);
+  const paceMin=(paces.length?Math.min(...paces):0)-0.4, paceMax=(paces.length?Math.max(...paces):1)+0.4;
   const yPace = v => M.top + ((v-paceMin)/(paceMax-paceMin))*plotH;
-  const hrsAll = fine.map(p=>p.hr).filter(h=>h);
+  const hrsAll = finePts.map(p=>p.hr).filter(h=>h);
   const hasHr = hrsAll.length>0;
   const hrTicks = hasHr ? niceTicks(Math.min(...hrsAll)-5, Math.max(...hrsAll)+5, 4) : [0,1];
   const hrMin=hrTicks[0], hrMax=hrTicks[hrTicks.length-1];
   const yHr = v => M.top+plotH-((v-hrMin)/(hrMax-hrMin))*plotH;
 
+  const clipId='ivl-clip-'+Math.random().toString(36).slice(2);
+  const clip=el('clipPath',{id:clipId}); clip.appendChild(el('rect',{x:M.left,y:M.top,width:plotW,height:plotH})); svg.appendChild(clip);
+
   bands.forEach(b=>{
+    if(b.end<winStart || b.start>winEnd) return; // band entirely outside the visible window
     const x0=xScale(b.start), x1=xScale(b.end);
     const color=segKindColor(b.label);
-    svg.appendChild(el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,0.5),height:plotH,fill:color+'1c'}));
+    svg.appendChild(el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,0.5),height:plotH,fill:color+'1c','clip-path':`url(#${clipId})`}));
     const hit=el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,1),height:plotH,fill:'transparent'});
     hit.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${b.label}</div><div class="tt-row">Held for <b>${fmtElapsed(b.durSec)}</b></div><div class="tt-row">Pace: <b>${paceStr(b.pace)}/mi</b></div>${b.avgHr?`<div class="tt-row">Avg HR: <b>${b.avgHr} bpm</b></div>`:''}`));
     hit.addEventListener('mousemove',positionTooltip); hit.addEventListener('mouseleave',hideTooltip);
@@ -2334,7 +2465,7 @@ function renderIntervalTimeChart(containerId, timeSeries, legendId){
       lbl.style.fill = color; lbl.style.fontWeight = '600'; lbl.textContent=text;
       svg.appendChild(lbl);
     }
-    svg.appendChild(el('line',{x1:x1,x2:x1,y1:M.top,y2:M.top+plotH,stroke:'var(--border-soft)','stroke-width':1}));
+    if(b.end>=winStart && b.end<=winEnd) svg.appendChild(el('line',{x1:x1,x2:x1,y1:M.top,y2:M.top+plotH,stroke:'var(--border-soft)','stroke-width':1}));
   });
 
   const paceTicks=niceTicks(paceMin,paceMax,5);
@@ -2342,19 +2473,19 @@ function renderIntervalTimeChart(containerId, timeSeries, legendId){
   const yTitle=el('text',{x:6,y:12}); yTitle.textContent='min/mi'; svg.appendChild(yTitle);
   const y1Title=el('text',{x:W-M.right,y:12,'text-anchor':'end'}); y1Title.textContent='bpm'; svg.appendChild(y1Title);
 
-  const timeTickCount = Math.max(4, Math.min(10, Math.round(totalTime/300)));
-  niceTicks(0, totalTime, timeTickCount).forEach(t=>{
-    if(t<0||t>totalTime) return;
+  const timeTickCount = Math.max(4, Math.min(10, Math.round(winSpan/300)));
+  niceTicks(winStart, winEnd, timeTickCount).forEach(t=>{
+    if(t<winStart-0.001||t>winEnd+0.001) return;
     const lbl=el('text',{x:xScale(t),y:H-M.bottom+16,'text-anchor':'middle'});
     lbl.textContent=fmtElapsed(t);
     svg.appendChild(lbl);
   });
 
-  let pacePath=''; fine.forEach((p,i)=>{ pacePath+=(i===0?'M':'L')+xScale(p.t)+','+yPace(p.pace)+' '; });
-  svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2}));
+  let pacePath=''; finePts.forEach((p,i)=>{ pacePath+=(i===0?'M':'L')+xScale(p.t)+','+yPace(p.pace)+' '; });
+  svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2,'clip-path':`url(#${clipId})`}));
   if(hasHr){
-    let hrPath=''; fine.forEach((p,i)=>{ hrPath+=(i===0?'M':'L')+xScale(p.t)+','+yHr(p.hr||hrMin)+' '; });
-    svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#c1614a','stroke-width':2}));
+    let hrPath=''; finePts.forEach((p,i)=>{ hrPath+=(i===0?'M':'L')+xScale(p.t)+','+yHr(p.hr||hrMin)+' '; });
+    svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#c1614a','stroke-width':2,'clip-path':`url(#${clipId})`}));
   }
 
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
@@ -2375,12 +2506,29 @@ function renderIntervalTimeChart(containerId, timeSeries, legendId){
 // Picks the right splits renderer for a run: the v11 time-elapsed chart when
 // a structured workout has the fine-grained stream available, the regular
 // distance-based chart otherwise (including every mile-based run, and a
-// structured workout whose fine stream wasn't available this sync).
+// structured workout whose fine stream wasn't available this sync). Either
+// way it registers through registerZoomChart so the chart is windowed/pannable
+// like every other chart — for the time chart the "index" domain is elapsed
+// seconds rather than a point count.
 function registerSplitsChart(containerId, title, splits, legendId, elevProfile, mileBased, timeSeries){
   if(!mileBased && timeSeries){
-    registerChart(containerId, title, renderIntervalTimeChart, timeSeries, legendId);
+    const totalTime = timeSeries.bands[timeSeries.bands.length-1].end;
+    registerZoomChart(containerId, {
+      title, data:timeSeries, domainSize:totalTime, minWindow:Math.min(totalTime, Math.max(30, totalTime*0.08)),
+      render:(container,data,view)=>renderIntervalTimeWindow(container,data,view,legendId),
+      rangeFmt:(data,view,zoomed)=>zoomed ? `${fmtElapsed(view.start)} – ${fmtElapsed(view.end)}` : `Full run · ${fmtElapsed(totalTime)}`
+    });
   } else {
-    registerChart(containerId, title, renderSplitsChart, splits, legendId, elevProfile, mileBased);
+    registerZoomChart(containerId, {
+      title, data:splits, domainSize:splits.length, minWindow:Math.min(splits.length,3),
+      render:(container,data,view)=>renderSplitsWindow(container,data,view,legendId,elevProfile,mileBased),
+      rangeFmt:(data,view,zoomed)=>{
+        if(!data.length) return '';
+        const lo=Math.max(0,Math.round(view.start)), hi=Math.min(data.length-1,Math.round(view.end));
+        const lbl=i=>{ const s=data[i]; return /^[0-9.]+$/.test(String(s.mile)) ? (mileBased?'Mi ':'Lap ')+s.mile : s.mile; };
+        return zoomed ? `${lbl(lo)} – ${lbl(hi)}` : `Full run · ${data.length} ${mileBased?'splits':'segments'}`;
+      }
+    });
   }
 }
 
@@ -2426,19 +2574,26 @@ function renderRouteMap(containerId, points){
 // Re-drawn on resize so the "match the container's real pixel size" fix above
 // actually keeps charts crisp as the viewport changes (rotation, window resize,
 // devtools panel toggling) instead of only getting it right on first paint.
-let RUNS_ASC=null, ACTIVE_SPLIT_ID=null;
+// RUNS_ASC/PACED_RUNS_ASC and HRV_PTS/VO2_PTS/EF_PTS are computed once (see
+// the init blocks below) and reused here rather than recomputed on every
+// resize, so registerZoomChart sees the SAME array reference each time and
+// correctly treats a resize as "redraw at current zoom" rather than "new
+// data, reset the zoom" — see registerZoomChart's doc comment above.
+let RUNS_ASC=null, PACED_RUNS_ASC=null, ACTIVE_SPLIT_ID=null, HRV_PTS=null, VO2_PTS=null, EF_PTS=null;
 function redrawCharts(){
-  safe('redraw volume', ()=>registerChart('chart-volume', 'Weekly Volume & Training Load', renderVolumeChart, DATA.weekly));
-  safe('redraw plan', ()=>registerChart('chart-plan', 'Plan vs. Actual', renderPlanChart, DATA.planComparison));
-  safe('redraw pace', ()=>{ if(RUNS_ASC) registerChart('chart-pace', 'Pace Progression', renderPaceChart, RUNS_ASC); });
-  safe('redraw hrv', ()=>registerChart('chart-hrv', 'HRV Trend', renderSeriesChart, DATA.hrv, 'hrv', '#5fa8a0'));
-  safe('redraw vo2', ()=>registerChart('chart-vo2', 'VO2 Max Trend', renderSeriesChart, DATA.vo2max, 'vo2', '#e3a857'));
-  safe('redraw efficiency', ()=>registerChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', renderSeriesChart, DATA.efficiencyTrend, 'ef', '#5fa8a0'));
+  safe('redraw volume', ()=>registerVolumeChart('chart-volume', 'Weekly Volume & Training Load', DATA.weekly));
+  safe('redraw plan', ()=>registerPlanChart('chart-plan', 'Plan vs. Actual', DATA.planComparison));
+  safe('redraw pace', ()=>{ if(PACED_RUNS_ASC) registerPaceChart('chart-pace', 'Pace Progression', PACED_RUNS_ASC); });
+  safe('redraw hrv', ()=>{ if(HRV_PTS) registerSeriesChart('chart-hrv', 'HRV Trend', HRV_PTS, 'hrv', '#5fa8a0'); });
+  safe('redraw vo2', ()=>{ if(VO2_PTS) registerSeriesChart('chart-vo2', 'VO2 Max Trend', VO2_PTS, 'vo2', '#e3a857'); });
+  safe('redraw efficiency', ()=>{ if(EF_PTS) registerSeriesChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', EF_PTS, 'ef', '#5fa8a0'); });
   safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]){ const lr=DATA.longRuns[ACTIVE_SPLIT_ID]; registerSplitsChart('chart-splits', `Long Run Splits — ${lr.label}`, lr.splits, 'splits-legend', lr.elevProfile, lr.mileBased, lr.timeSeries); } });
   Object.values(ROUTE_MAP_INSTANCES).forEach(m=>{ try{ m.invalidateSize(); }catch(e){} });
-  if(ZOOM.chartId && CHART_REGISTRY[ZOOM.chartId] && document.getElementById('chart-zoom-modal').style.display!=='none'){
-    resetZoom(); // also schedules a re-render at the viewport's new size
-  }
+  // If a chart is currently expanded in the zoom modal, its container was
+  // already redrawn above IF it's one of the 6 main charts — but the run-detail
+  // modal's own splits chart isn't tracked by this function, so redraw
+  // whichever chart is actually in the modal directly, unconditionally.
+  if(CHART_ZOOM_STATE){ const inst=CHART_INSTANCES[CHART_ZOOM_STATE.chartId]; if(inst) inst.redraw(); }
 }
 let _resizeTimer;
 window.addEventListener('resize', ()=>{ clearTimeout(_resizeTimer); _resizeTimer=setTimeout(redrawCharts, 180); });
@@ -2495,11 +2650,11 @@ safe('recommendation panel', function(){
   `;
 });
 
-safe('weekly volume chart', function(){ registerChart('chart-volume', 'Weekly Volume & Training Load', renderVolumeChart, DATA.weekly); });
+safe('weekly volume chart', function(){ registerVolumeChart('chart-volume', 'Weekly Volume & Training Load', DATA.weekly); });
 
 safe('plan vs actual', function(){
   const plan = DATA.planComparison || [];
-  registerChart('chart-plan', 'Plan vs. Actual', renderPlanChart, plan);
+  registerPlanChart('chart-plan', 'Plan vs. Actual', plan);
   const STATUS_BADGE = { 'on-track':'good', 'behind':'moderate', 'well-behind':'low-warn', 'upcoming':'upcoming', 'no-data':'no-data' };
   const STATUS_LABEL = { 'on-track':'On Track', 'behind':'Behind', 'well-behind':'Well Behind', 'upcoming':'Upcoming', 'no-data':'No Data' };
   document.getElementById('plan-table-body').innerHTML = plan.map(w=>{
@@ -2523,7 +2678,8 @@ safe('plan vs actual', function(){
 safe('pace progression chart', function(){
   const runsAsc = [...DATA.runs].sort((a,b)=> new Date(a.date)-new Date(b.date));
   RUNS_ASC = runsAsc;
-  registerChart('chart-pace', 'Pace Progression', renderPaceChart, runsAsc);
+  PACED_RUNS_ASC = runsAsc.filter(r=>r.paceMinMi);
+  registerPaceChart('chart-pace', 'Pace Progression', PACED_RUNS_ASC);
   const types = [...new Set(DATA.runs.map(r=>r.type))];
   document.getElementById('pace-legend').innerHTML = types.map(t=>`<div class="legend-item"><span class="legend-swatch" style="background:${TYPE_COLORS[t]}"></span>${t}</div>`).join('') + `<div class="legend-item"><span class="legend-swatch" style="background:#e7e9ec"></span>5-run rolling avg</div>`;
 });
@@ -2542,7 +2698,8 @@ safe('recovery panel', function(){
   document.getElementById('readiness-badge').outerHTML = `<span class="badge ${levelClass}" id="readiness-badge">${level ? level.replace(/_/g,' ') : '—'}</span>`;
   document.getElementById('training-status-badge').textContent = DATA.trainingStatusFeedback || '—';
   document.getElementById('training-acwr').textContent = DATA.acwr!=null ? `ACWR ${DATA.acwr.toFixed(2)}` : '';
-  registerChart('chart-hrv', 'HRV Trend', renderSeriesChart, DATA.hrv, 'hrv', '#5fa8a0');
+  HRV_PTS = DATA.hrv.filter(p=>typeof p.hrv==='number');
+  registerSeriesChart('chart-hrv', 'HRV Trend', HRV_PTS, 'hrv', '#5fa8a0');
   const mix = DATA.loadMix;
   if(mix){
     const rows = [
@@ -2574,8 +2731,10 @@ safe('fitness trend', function(){
     <div class="score-item"><b>${DATA.enduranceScore!=null?DATA.enduranceScore:'—'}</b><span>Endurance Score</span></div>
     <div class="score-item"><b>${DATA.hillScore!=null?DATA.hillScore:'—'}</b><span>Hill Score</span></div>
   `;
-  registerChart('chart-vo2', 'VO2 Max Trend', renderSeriesChart, DATA.vo2max, 'vo2', '#e3a857');
-  registerChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', renderSeriesChart, DATA.efficiencyTrend, 'ef', '#5fa8a0');
+  VO2_PTS = DATA.vo2max.filter(p=>typeof p.vo2==='number');
+  EF_PTS = DATA.efficiencyTrend.filter(p=>typeof p.ef==='number');
+  registerSeriesChart('chart-vo2', 'VO2 Max Trend', VO2_PTS, 'vo2', '#e3a857');
+  registerSeriesChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', EF_PTS, 'ef', '#5fa8a0');
 });
 
 safe('long run splits', function(){
@@ -2695,11 +2854,8 @@ safe('run detail modal', function(){
     document.body.style.overflow='hidden';
     if(route && route.length>1) renderRouteMap('modal-route', route);
     if(splits.length) registerSplitsChart('modal-splits-chart', `${splitsSectionTitle} — ${run.name}`, splits, 'modal-splits-legend', elevProfile, mileBased, detail.timeSeries);
-    attachChartExpandButtons(body);
   };
 });
-
-safe('chart expand buttons', function(){ attachChartExpandButtons(document); });
 """
 
 if __name__ == "__main__":

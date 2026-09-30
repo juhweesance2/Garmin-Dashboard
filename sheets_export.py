@@ -342,10 +342,11 @@ def run_row(a, stamp, zones=None):
         if v is None and zones:
             v = zones.get(z)
         row[f"hr_z{z}_min"] = _mul(v, 1 / 60, 1)
-    # Speed per heartbeat: mph / avg HR x 1000. Higher = more ground at the same effort.
-    # Same idea as the dashboard's metric; the scale may differ, the trend is what matters.
-    if speed and avg_hr:
-        row["aero_efficiency"] = round(speed * 2.236936 / avg_hr * 1000, 2)
+    # Speed per heartbeat, same formula and scale as the dashboard's
+    # build_efficiency_trend(): (distance / total time, in mph) / avg HR x 1000.
+    dur_h = (_num(a.get("duration")) or 0) / 3600
+    if dist_mi and dur_h and avg_hr:
+        row["aero_efficiency"] = round(dist_mi / dur_h / avg_hr * 1000, 2)
     return row
 
 
@@ -511,30 +512,33 @@ def build_track(aid, date_s, details):
 
 
 # ------------------------------------------------------------ derived tables
-_TYPE_WORDS = [("Tempo", ("tempo", "threshold")),
-               ("Speed", ("interval", "speed", "repeat", "800", "400", "track", "fartlek")),
-               ("Strides", ("stride",)),
-               ("Benchmark", ("benchmark", "time trial", "race"))]
+# Same keywords, order and labels as classify_types() in update_dashboard.py
+_TYPE_WORDS = [("Strides", ("stride",)),
+               ("Tempo", ("tempo",)),
+               ("Speed", ("interval", "speed")),
+               ("Benchmark", ("benchmark", "time trial"))]
 
 
 def classify_types(runs):
-    """Fills type for rows without a dashboard-provided type, using the same rule
-    as the dashboard: name keywords, else the week's longest run = Long, else Easy."""
-    weeks = {}
-    for r in runs:
-        if r.get("date"):
-            ws = _week_start(r["date"])
-            weeks.setdefault(ws, []).append(r)
-    for r in runs:
-        if r.get("type_source") == "dashboard" and r.get("type"):
-            continue
+    """Fills type for runs the dashboard didn't classify (i.e. older than its
+    180-day window), with the dashboard's own rule: name keywords first, then the
+    week's longest untyped run (4+ mi) = Long Run, everything else = Easy Run."""
+    todo = [r for r in runs if not (r.get("type_source") == "dashboard" and r.get("type"))]
+    for r in todo:
         name = str(r.get("name") or "").lower()
-        t = next((label for label, words in _TYPE_WORDS if any(w in name for w in words)), None)
-        if not t and r.get("date"):
-            wk = weeks.get(_week_start(r["date"]), [])
-            longest = max(wk, key=lambda x: _num(x.get("distance_mi")) or 0)
-            t = "Long" if longest is r and (_num(r.get("distance_mi")) or 0) >= 5 else "Easy"
-        r["type"], r["type_source"] = t or "Easy", "auto"
+        r["type"] = next((label for label, words in _TYPE_WORDS if any(w in name for w in words)), None)
+        r["type_source"] = "auto"
+    weeks = {}
+    for r in todo:
+        if r.get("date") and r["type"] is None:
+            weeks.setdefault(_week_start(r["date"]), []).append(r)
+    for wk in weeks.values():
+        longest = max(wk, key=lambda x: _num(x.get("distance_mi")) or 0)
+        if (_num(longest.get("distance_mi")) or 0) >= 4:
+            longest["type"] = "Long Run"
+    for r in todo:
+        if r["type"] is None:
+            r["type"] = "Easy Run"
 
 
 def _week_start(ds):
@@ -554,7 +558,7 @@ def build_weekly(runs):
         mins = sum(_num(r.get("duration_min")) or 0 for r in rs)
         load = sum(_num(r.get("training_load")) or 0 for r in rs)
         prev4 = loads[-4:]
-        easy = [r for r in rs if r.get("type") in ("Easy", "Long")]
+        easy = [r for r in rs if r.get("type") in ("Easy Run", "Long Run")]
         eff = [_num(r.get("aero_efficiency")) for r in easy if _num(r.get("aero_efficiency"))]
         out.append({
             "week_start": ws, "miles": round(miles, 2), "runs": len(rs),
@@ -575,16 +579,16 @@ def build_plan(payload):
     if isinstance(plan, dict):
         plan = _pick(plan, "weeks", "rows", default=[]) or []
     return [{
-        "week": _num(_pick(p, "week", "weekNum", "weekNumber")),
+        "week": _num(_pick(p, "week", "weekNum", "weekNumber")) or i,
         "phase": _pick(p, "phase"),
         "week_start": _date(_pick(p, "weekStart", "start", "date")),
         "planned_mi": _num(_pick(p, "plannedMi", "planned", "plannedMiles")),
         "actual_mi": _num(_pick(p, "actualMi", "actual", "actualMiles")),
         "adherence_pct": _num(_pick(p, "adherencePct", "adherence")),
-        "planned_long_mi": _num(_pick(p, "plannedLongMi", "plannedLong")),
-        "actual_long_mi": _num(_pick(p, "actualLongMi", "actualLong")),
+        "planned_long_mi": _num(_pick(p, "plannedLongRun", "plannedLongMi", "plannedLong")),
+        "actual_long_mi": _num(_pick(p, "actualLongRun", "actualLongMi", "actualLong")),
         "status": _pick(p, "status"),
-    } for p in plan if isinstance(p, dict)]
+    } for i, p in enumerate((p for p in plan if isinstance(p, dict)), start=1)]
 
 
 def _dashboard_types(payload):
@@ -599,11 +603,11 @@ def _dashboard_types(payload):
 DICTIONARY = [
     ("About", "", f"Garmin running data for training toward the {RACE_NAME} on {RACE_DATE}. Synced twice daily. Pace is decimal minutes per mile (9.5 = 9:30/mi). Distances in miles, elevation in feet, dates are Pacific time. Blank = not recorded."),
     ("Runs", "activity_id", "Garmin activity ID; joins Runs to Laps and Track."),
-    ("Runs", "type", "Easy / Long / Tempo / Speed / Strides / Benchmark. type_source=dashboard means the dashboard classified it; auto means name keywords or longest-run-of-week rule."),
+    ("Runs", "type", "Easy Run / Long Run / Tempo / Speed / Strides / Benchmark. type_source=dashboard: classified by the dashboard; auto: same rules applied here (runs older than the dashboard's 180-day window)."),
     ("Runs", "pace_min_per_mi", "Average pace, decimal minutes per mile."),
     ("Runs", "training_load / aerobic_te / anaerobic_te", "Garmin's EPOC-based load and 0-5 training effect scores."),
     ("Runs", "hr_z1_min..hr_z5_min", "Minutes in each heart-rate zone. Z1-Z2 = easy, Z3 = moderate, Z4-Z5 = hard (80/20 guideline compares these)."),
-    ("Runs", "aero_efficiency", "Speed per heartbeat: mph / avg HR x 1000. Rising on Easy/Long runs = aerobic fitness improving."),
+    ("Runs", "aero_efficiency", "Speed per heartbeat: mph / avg HR x 1000, same scale as the dashboard. Rising on Easy Run/Long Run = aerobic fitness improving."),
     ("Runs", "stride_length_m / vert_osc_cm / ground_contact_ms / avg_power_w", "Running dynamics; blank if the watch/sensor didn't record them."),
     ("Daily", "training_readiness", "Garmin 0-100 readiness score for that morning."),
     ("Daily", "hrv_ms / hrv_weekly_avg_ms / hrv_status", "Overnight HRV average, 7-day average, and Garmin's status (BALANCED/UNBALANCED/LOW)."),
@@ -612,8 +616,8 @@ DICTIONARY = [
     ("Daily", "pred_*_min", "Garmin race-time predictions in minutes (pred_half_min 125.5 = 2:05:30)."),
     ("Laps", "lap_type / lap_label", "Mile (per-mile autolap) / Partial (final leftover) for steady runs; Warm Up / Interval N / Recovery N / Cool Down for structured workouts."),
     ("Track", "", f"One point every {TRACK_BIN_MI} mi per run: GPS lat/lon (route map), elevation_ft + grade_pct (terrain profile), hr, pace, cadence (within-run analysis). elapsed_min is time since start; use it for interval time charts."),
-    ("Weekly", "", "Computed from Runs. load_ratio = week's load / avg of previous 4 weeks. quality_runs = Tempo/Speed/Strides/Benchmark."),
-    ("PlanVsActual", "", "The 13-week training plan vs. what was logged, from the dashboard. Only running days (Mon/Wed/Sat) are tracked."),
+    ("Weekly", "", "Computed from Runs. load_ratio = week's Garmin training load / avg of previous 4 weeks (the dashboard's ACWR uses mileage instead). quality_runs = Tempo/Speed/Strides/Benchmark."),
+    ("PlanVsActual", "", "The 13-week Monterey Bay plan (starts 2026-08-10) vs. what was logged, from the dashboard. status: on-track (85%+ of planned miles), behind (60-84%), well-behind (<60%), upcoming. Only running days (Mon/Wed/Sat) are tracked."),
 ]
 
 

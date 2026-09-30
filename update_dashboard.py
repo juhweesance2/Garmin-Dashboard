@@ -4,6 +4,7 @@ import os
 import statistics
 from datetime import datetime, timedelta, date
 from garminconnect import Garmin
+from zoneinfo import ZoneInfo
 
 # =====================================================================
 # Config
@@ -1121,7 +1122,10 @@ def main():
     client = Garmin(email, password)
     client.login()
 
-    today = datetime.now().date()
+    # Pacific time, not the GitHub runner's UTC clock: the evening sync runs
+    # after midnight UTC, which would otherwise make "today" tomorrow's date
+    # and leave that day's sleep/readiness/HRV blank.
+    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
     start_history = today - timedelta(days=HISTORY_DAYS)
 
     # ---- Runs ----
@@ -1369,6 +1373,15 @@ def main():
     with open("index.html", "w") as f:
         f.write(html)
     print("Dashboard generated successfully.")
+
+    # ---- Google Sheets export (for Gemini) ----
+    # Runs after the dashboard is saved, so a Sheets problem can never stop the
+    # dashboard from updating. Skips itself if GOOGLE_SA_JSON / SHEET_ID aren't set.
+    try:
+        from sheets_export import export_to_sheets
+        export_to_sheets(data, garmin=client)
+    except Exception as e:
+        print(f"Sheets export skipped: {e}")
 
 
 HTML_SHELL = r"""<!DOCTYPE html>

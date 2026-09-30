@@ -1,0 +1,39 @@
+name: Backfill Google Sheet (one-time)
+
+# Manual only. Actions tab -> "Backfill Google Sheet (one-time)" -> Run workflow.
+# Safe to re-run: every tab is keyed, and runs already in Laps/Track are skipped,
+# so a re-run after a timeout or rate limit just picks up where it stopped.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How many days back to backfill"
+        default: "120"
+        required: true
+
+permissions:
+  contents: read
+
+# Shares a lock with the twice-daily update so the two never write the Sheet at once.
+concurrency:
+  group: garmin-dashboard-update
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install garminconnect "gspread>=6"
+      - name: Backfill
+        env:
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+        run: python sheets_export.py --backfill ${{ inputs.days }}

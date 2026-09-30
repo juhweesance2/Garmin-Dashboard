@@ -758,7 +758,8 @@ def export_to_sheets(payload=None, garmin=None):
         if not os.environ.get("GOOGLE_SA_JSON", "").strip() or not os.environ.get("SHEET_ID", "").strip():
             print("[sheets] GOOGLE_SA_JSON / SHEET_ID not set; skipping export")
             return
-        sync(garmin or _login(), _open_sheet(), DAILY_LOOKBACK_DAYS, payload)
+        sheet = _open_sheet()
+        sync(garmin or _login(), sheet, DAILY_LOOKBACK_DAYS, payload)
     except Exception as e:
         print(f"[sheets] export failed: {type(e).__name__}: {e}")
 
@@ -766,6 +767,10 @@ def export_to_sheets(payload=None, garmin=None):
 if __name__ == "__main__":
     if "--backfill" in sys.argv:
         n = int(sys.argv[sys.argv.index("--backfill") + 1])
-        sync(_login(), _open_sheet(), n, None)
+        # Open the Sheet BEFORE logging into Garmin: if the Google side is
+        # misconfigured, fail fast without spending a Garmin login (GitHub's
+        # shared IPs get rate-limited by Garmin when logins pile up).
+        sheet = _open_sheet()
+        sync(_login(), sheet, n, None)
     else:
         sys.exit("usage: python sheets_export.py --backfill 120")

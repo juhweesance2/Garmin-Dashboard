@@ -4,7 +4,6 @@ import os
 import statistics
 from datetime import datetime, timedelta, date
 from garminconnect import Garmin
-from zoneinfo import ZoneInfo
 
 # =====================================================================
 # Config
@@ -700,7 +699,25 @@ def parse_elevation_profile(details, max_points=150):
 # field layout isn't confirmed against a real account — this returns None,
 # and both features fall back to their v10 behavior, if the shape doesn't
 # match or there isn't enough data to work with.
+#
+# v14 fix: consecutive samples can report almost no distance change over a
+# real time gap — not because the runner stopped, but because Garmin's
+# distance field updates in coarse, uneven steps (GPS/accelerometer fusion
+# noise), so two samples a second or two apart sometimes show a sub-meter
+# delta even while genuinely moving. Deriving a pace from that tiny distance
+# over a real time gap produces an absurd instantaneous "pace" (anywhere from
+# wildly slow to a nonsense triple-digit min/mi spike) that doesn't reflect
+# anything real. MIN_DIST_DELTA_M and PACE_CEILING_MIN_MI below require a
+# minimum meaningful distance before a pace is derived at all, and reject the
+# rare remaining outlier by a plain sanity ceiling — well past even a walked
+# recovery break — rather than clamping it to a wrong-but-plausible number. A
+# skipped sample just leaves a gap in the fine curve instead of a garbled
+# spike; every consumer downstream already treats a missing/falsy pace as
+# "no data for this point," not as zero.
 # =====================================================================
+MIN_DIST_DELTA_M = 3.0
+PACE_CEILING_MIN_MI = 30.0
+
 def parse_fine_stream(details, max_points=400):
     if not isinstance(details, dict):
         return None
@@ -750,8 +767,13 @@ def parse_fine_stream(details, max_points=400):
         pace = None
         if prev is not None:
             dt, dd = t - prev[0], d_m - prev[1]
-            if dt > 0 and dd > 0:
-                pace = (dt / 60) / (dd * MI_PER_M)
+            # require a real, meaningful distance delta before deriving an
+            # instantaneous pace from it, and reject anything that still comes
+            # out absurd — see the v14 note above.
+            if dt > 0 and dd > MIN_DIST_DELTA_M:
+                candidate = (dt / 60) / (dd * MI_PER_M)
+                if candidate <= PACE_CEILING_MIN_MI:
+                    pace = candidate
         out.append({"t": t, "d": d_m, "elevFt": e_ft, "hr": hr, "paceMinMi": pace})
         prev = (t, d_m)
     if len(out) > max_points * 2:
@@ -930,11 +952,19 @@ def insight_bonk(long_runs_ordered):
             continue
         mid = len(splits) // 2
         front, back = splits[:mid], splits[mid:]
-        front_pace = sum(s["pace"] for s in front) / len(front)
-        back_pace = sum(s["pace"] for s in back) / len(back)
+        # v14 fix: a lap's pace can genuinely be missing (None) now that
+        # build_splits no longer fakes a 0 for it — filter those out before
+        # averaging, and guard against either half coming up empty, rather
+        # than letting a None slip into the sum and raise.
+        front_paces = [s["pace"] for s in front if s.get("pace")]
+        back_paces = [s["pace"] for s in back if s.get("pace")]
         front_hrs = [s["avgHr"] for s in front if s["avgHr"]]
         back_hrs = [s["avgHr"] for s in back if s["avgHr"]]
-        if not front_pace or not front_hrs or not back_hrs:
+        if not front_paces or not back_paces or not front_hrs or not back_hrs:
+            continue
+        front_pace = sum(front_paces) / len(front_paces)
+        back_pace = sum(back_paces) / len(back_paces)
+        if not front_pace:
             continue
         front_hr, back_hr = sum(front_hrs) / len(front_hrs), sum(back_hrs) / len(back_hrs)
         pace_fade_pct = (back_pace - front_pace) / front_pace * 100
@@ -1122,10 +1152,7 @@ def main():
     client = Garmin(email, password)
     client.login()
 
-    # Pacific time, not the GitHub runner's UTC clock: the evening sync runs
-    # after midnight UTC, which would otherwise make "today" tomorrow's date
-    # and leave that day's sleep/readiness/HRV blank.
-    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    today = datetime.now().date()
     start_history = today - timedelta(days=HISTORY_DAYS)
 
     # ---- Runs ----
@@ -1159,7 +1186,16 @@ def main():
             out.append({
                 "mile": i,
                 "distMi": round(lap_dist_mi, 2) if lap_dist_mi is not None else None,
-                "pace": pace_min_per_mile(lap_dist_m, lap.get("duration")) or 0,
+                # v14 fix: this used to fall back to 0 when a lap's pace couldn't be
+                # computed (missing/zero distance or duration) — 0 min/mi isn't "no
+                # data," it's a nonsense pace that then plotted and averaged as if it
+                # were real (a lap line dropping to the axis floor, a tooltip reading
+                # "0:00/mi", classification thresholds getting skewed by a fake
+                # fastest-ever lap). Leaving it as None instead means every consumer
+                # (the chart, the table, the interval classifier) treats it as a genuine
+                # gap — a "—" in the table, a break in the line, excluded from any
+                # average — rather than a garbled number.
+                "pace": pace_min_per_mile(lap_dist_m, lap.get("duration")),
                 "avgHr": lap.get("averageHR"),
                 "maxHr": lap.get("maxHR"),
                 "elevGainFt": round(m_to_ft(lap.get("elevationGain"))) if lap.get("elevationGain") is not None else 0,
@@ -1374,15 +1410,6 @@ def main():
         f.write(html)
     print("Dashboard generated successfully.")
 
-    # ---- Google Sheets export (for Gemini) ----
-    # Runs after the dashboard is saved, so a Sheets problem can never stop the
-    # dashboard from updating. Skips itself if GOOGLE_SA_JSON / SHEET_ID aren't set.
-    try:
-        from sheets_export import export_to_sheets
-        export_to_sheets(data, garmin=client)
-    except Exception as e:
-        print(f"Sheets export skipped: {e}")
-
 
 HTML_SHELL = r"""<!DOCTYPE html>
 <html lang="en">
@@ -1391,7 +1418,7 @@ HTML_SHELL = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>__TITLE__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@600;700;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <style>__CSS__</style>
@@ -1487,11 +1514,13 @@ HTML_SHELL = r"""<!DOCTYPE html>
     <div class="panel-triple">
       <div class="panel">
         <div class="stat-label">Training Readiness — Today</div>
-        <div class="dial-row" style="margin-top:10px;">
-          <div>
-            <div class="dial-num" id="readiness-score">—</div>
-            <div class="dial-label">out of 100</div>
-          </div>
+        <div class="readiness-ring-row">
+          <svg class="readiness-ring" viewBox="0 0 110 110" width="104" height="104">
+            <circle cx="55" cy="55" r="46" fill="none" class="ring-track" stroke-width="10"/>
+            <circle cx="55" cy="55" r="46" fill="none" class="ring-fill" id="readiness-ring-fill" stroke-width="10" stroke-linecap="round" transform="rotate(-90 55 55)"/>
+            <text x="55" y="51" text-anchor="middle" class="ring-number" id="readiness-score">—</text>
+            <text x="55" y="68" text-anchor="middle" class="ring-caption">/ 100</text>
+          </svg>
           <div>
             <span class="badge" id="readiness-badge">—</span>
           </div>
@@ -1613,36 +1642,37 @@ HTML_SHELL = r"""<!DOCTYPE html>
 
 CSS = r"""
 :root{
-  --bg: #12151a; --bg-panel: #1a1e24; --bg-raised: #20252c; --bg-inset: #0d1013;
-  --border: #2a3038; --border-soft: #22262d;
-  --text: #e7e9ec; --text-muted: #8b95a1; --text-dim: #5c6570;
-  --amber: #e3a857; --amber-dim: #4a3d28;
-  --teal: #5fa8a0; --teal-dim: #24393a;
-  --clay: #c1614a; --clay-dim: #3c2620;
-  --blue: #6690c4; --blue-dim: #232f42;
-  --font-display: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --bg: #0E141C; --bg-panel: #182230; --bg-raised: #1F2C3D; --bg-inset: #0B1017;
+  --border: rgba(230,237,245,0.10); --border-soft: rgba(230,237,245,0.06);
+  --text: #E6EDF5; --text-muted: #7E8EA3; --text-dim: #57636F;
+  --amber: #00B4E0; --amber-dim: #0B3245;
+  --teal: #2FD480; --teal-dim: #123B2C;
+  --clay: #FF5A64; --clay-dim: #401A1C;
+  --blue: #45D6B0; --blue-dim: #123832;
+  --warn: #FFB020; --warn-dim: #3D2E0E;
+  --font-display: 'Titillium Web', 'Arial Narrow', sans-serif;
   --font-body: 'IBM Plex Sans', -apple-system, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
 }
 *{ box-sizing:border-box; margin:0; padding:0; }
 body{ background:var(--bg); color:var(--text); font-family:var(--font-body); line-height:1.5; -webkit-font-smoothing:antialiased; padding:0 0 64px; }
-::selection{ background:var(--amber); color:#12151a; }
+::selection{ background:var(--amber); color:#0E141C; }
 .wrap{ max-width:1180px; margin:0 auto; padding:0 24px; }
-.console-header{ border-bottom:1px solid var(--border); background: radial-gradient(ellipse 900px 300px at 15% -20%, rgba(227,168,87,0.10), transparent), var(--bg); padding:28px 0 22px; }
+.console-header{ border-bottom:1px solid var(--border); background: radial-gradient(ellipse 900px 300px at 15% -20%, rgba(0,180,224,0.12), transparent), var(--bg); padding:28px 0 22px; }
 .header-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:24px; flex-wrap:wrap; }
 .brand-eyebrow{ font-family:var(--font-mono); font-size:11px; letter-spacing:0.14em; color:var(--amber); text-transform:uppercase; display:block; margin-bottom:6px; }
-h1{ font-family:var(--font-display); font-weight:700; font-size:clamp(21px,5.5vw,30px); letter-spacing:-0.01em; text-wrap:balance; }
+h1{ font-family:var(--font-display); font-weight:900; font-size:clamp(20px,5.5vw,28px); letter-spacing:0.01em; text-transform:uppercase; text-wrap:balance; }
 .sync-badge{ font-family:var(--font-mono); font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); white-space:nowrap; }
 .sync-dot{ width:7px; height:7px; border-radius:50%; background:var(--teal); box-shadow:0 0 8px var(--teal); flex-shrink:0; }
-.countdown-strip{ margin-top:22px; display:flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:var(--bg-panel); flex-wrap:wrap; }
+.countdown-strip{ margin-top:22px; display:flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; background:var(--bg-panel); flex-wrap:wrap; }
 .countdown-cell{ flex:1; padding:16px 20px; border-right:1px solid var(--border-soft); display:flex; flex-direction:column; gap:4px; min-width:130px; }
 .countdown-cell:last-child{ border-right:none; }
 .cc-label{ font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); font-family:var(--font-mono); }
 .cc-value{ font-family:var(--font-mono); font-size:clamp(17px,4.5vw,24px); font-weight:600; color:var(--text); }
 .cc-value.accent{ color:var(--amber); }
 .cc-sub{ font-size:12px; color:var(--text-muted); }
-.boot-errors{ margin-top:16px; padding:12px 16px; border:1px solid var(--clay); background:var(--clay-dim); border-radius:8px; font-family:var(--font-mono); font-size:12px; color:var(--clay); }
-.stat-strip{ display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-top:28px; }
+.boot-errors{ margin-top:16px; padding:12px 16px; border:1px solid var(--clay); background:var(--clay-dim); border-radius:4px; font-family:var(--font-mono); font-size:12px; color:var(--clay); }
+.stat-strip{ display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:6px; overflow:hidden; margin-top:28px; }
 .stat-cell{ background:var(--bg-panel); padding:18px 18px 16px; }
 .stat-label{ font-size:11px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-dim); font-family:var(--font-mono); margin-bottom:8px; }
 .stat-value{ font-family:var(--font-mono); font-size:clamp(19px,4.4vw,26px); font-weight:600; font-variant-numeric:tabular-nums; }
@@ -1652,10 +1682,10 @@ h1{ font-family:var(--font-display); font-weight:700; font-size:clamp(21px,5.5vw
 .stat-delta.warn{ color:var(--clay); }
 section{ margin-top:44px; }
 .section-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:16px; gap:16px; flex-wrap:wrap; }
-.section-title{ font-family:var(--font-display); font-weight:600; font-size:clamp(16px,3.6vw,19px); display:flex; align-items:center; gap:10px; }
+.section-title{ font-family:var(--font-display); font-weight:700; font-size:clamp(15px,3.6vw,18px); text-transform:uppercase; letter-spacing:0.04em; display:flex; align-items:center; gap:10px; }
 .section-index{ font-family:var(--font-mono); color:var(--amber); font-size:13px; }
 .section-note{ font-size:13px; color:var(--text-muted); max-width:440px; text-align:right; }
-.panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:22px; }
+.panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:6px; padding:20px; }
 .panel-split{ display:grid; grid-template-columns:1.4fr 1fr; gap:16px; }
 .panel-triple{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
 @media (max-width:860px){ .panel-split, .panel-triple{ grid-template-columns:1fr; } .stat-strip{ grid-template-columns:repeat(2,1fr); } }
@@ -1696,19 +1726,23 @@ section{ margin-top:44px; }
 .legend-item{ display:flex; align-items:center; gap:6px; }
 .legend-swatch{ width:10px; height:10px; border-radius:2px; }
 .chart-caption{ font-family:var(--font-mono); font-size:0.64rem; color:var(--text-dim); margin-top:6px; text-align:center; }
-.insight-card{ background:var(--bg-raised); border:1px solid var(--border-soft); border-radius:10px; padding:16px 18px; display:flex; gap:12px; align-items:flex-start; }
+.insight-card{ background:var(--bg-raised); border:1px solid var(--border-soft); border-radius:6px; padding:16px 18px; display:flex; gap:12px; align-items:flex-start; }
 .insight-icon{ font-family:var(--font-mono); font-size:11px; padding:3px 7px; border-radius:4px; flex-shrink:0; margin-top:2px; white-space:nowrap; }
 .insight-icon.good{ background:var(--teal-dim); color:var(--teal); }
-.insight-icon.watch{ background:var(--amber-dim); color:var(--amber); }
+.insight-icon.watch{ background:var(--warn-dim); color:var(--warn); }
 .insight-icon.flag{ background:var(--clay-dim); color:var(--clay); }
 .insight-text{ font-size:13.5px; color:var(--text); line-height:1.55; }
 .insight-text b{ color:var(--text); font-weight:600; }
+.readiness-ring-row{ display:flex; gap:20px; align-items:center; margin-top:10px; }
+.readiness-ring .ring-track{ stroke:var(--border-soft); }
+.readiness-ring .ring-fill{ stroke:var(--amber); transition:stroke-dasharray .3s ease; }
+.readiness-ring .ring-number{ font-family:var(--font-mono); font-size:22px; font-weight:600; fill:var(--text); }
+.readiness-ring .ring-caption{ font-family:var(--font-body); font-size:9px; fill:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; }
 .dial-row{ display:flex; gap:22px; align-items:center; }
-.dial-num{ font-family:var(--font-mono); font-size:clamp(24px,6vw,34px); font-weight:600; }
 .dial-label{ font-size:12px; color:var(--text-muted); margin-top:2px; }
-.badge{ display:inline-block; font-family:var(--font-mono); font-size:11px; padding:3px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:0.05em; }
+.badge{ display:inline-block; font-family:var(--font-display); font-weight:700; font-size:10.5px; padding:3px 9px; border-radius:3px; text-transform:uppercase; letter-spacing:0.05em; }
 .badge.high, .badge.good{ background:var(--teal-dim); color:var(--teal); }
-.badge.moderate{ background:var(--amber-dim); color:var(--amber); }
+.badge.moderate{ background:var(--warn-dim); color:var(--warn); }
 .badge.low, .badge.low-warn{ background:var(--clay-dim); color:var(--clay); }
 .badge.upcoming, .badge.no-data{ background:var(--bg-inset); color:var(--text-dim); }
 .plan-week-cell{ font-family:var(--font-mono); font-size:12.5px; }
@@ -1758,12 +1792,12 @@ thead th.sorted{ color:var(--amber); }
 tbody td{ padding:10px 12px; border-bottom:1px solid var(--border-soft); font-family:var(--font-mono); white-space:nowrap; }
 tbody td.name-cell{ font-family:var(--font-body); white-space:normal; }
 tbody tr:hover{ background:var(--bg-raised); }
-.type-pill{ font-family:var(--font-body); font-size:11px; padding:2px 8px; border-radius:20px; display:inline-block; }
+.type-pill{ font-family:var(--font-display); font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:0.02em; padding:2px 8px; border-radius:3px; display:inline-block; }
 .type-pill.Long-Run{ background:var(--blue-dim); color:var(--blue); }
 .type-pill.Easy-Run{ background:var(--bg-inset); color:var(--text-muted); }
-.type-pill.Tempo{ background:var(--amber-dim); color:var(--amber); }
+.type-pill.Tempo{ background:rgba(255,176,32,0.14); color:#FFB020; }
 .type-pill.Speed{ background:var(--clay-dim); color:var(--clay); }
-.type-pill.Benchmark{ background:var(--teal-dim); color:var(--teal); }
+.type-pill.Benchmark{ background:rgba(155,140,255,0.14); color:#9B8CFF; }
 .type-pill.Strides{ background:var(--bg-inset); color:var(--text-dim); }
 .table-scroll{ overflow-x:auto; }
 tbody tr.run-row{ cursor:pointer; }
@@ -1773,17 +1807,17 @@ footer .update-note b{ color:var(--text-muted); }
 .empty{ color:var(--text-dim); font-size:0.85rem; }
 
 .modal-overlay{ position:fixed; inset:0; background:rgba(13,16,19,0.72); backdrop-filter:blur(2px); z-index:1000; display:flex; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto; }
-.modal-panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:14px; max-width:760px; width:100%; padding:24px; position:relative; margin-bottom:40px; }
+.modal-panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:8px; max-width:760px; width:100%; padding:24px; position:relative; margin-bottom:40px; }
 .modal-close{ position:absolute; top:14px; right:14px; background:var(--bg-raised); border:1px solid var(--border); color:var(--text-muted); width:32px; height:32px; border-radius:8px; font-size:18px; cursor:pointer; line-height:1; }
 .modal-close:hover{ color:var(--text); border-color:var(--text-dim); }
 .modal-title{ font-family:var(--font-display); font-weight:700; font-size:clamp(18px,3.8vw,22px); margin-bottom:4px; padding-right:40px; text-wrap:balance; }
 .modal-sub{ font-family:var(--font-mono); font-size:12px; color:var(--text-muted); margin-bottom:18px; }
-.modal-stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-bottom:22px; }
+.modal-stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:6px; overflow:hidden; margin-bottom:22px; }
 .modal-stat{ background:var(--bg-raised); padding:12px 14px; }
 .modal-stat .stat-label{ margin-bottom:6px; }
 .modal-stat .stat-value{ font-size:clamp(15px,3.6vw,18px); }
 .modal-section-title{ font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); margin:22px 0 10px; }
-.route-map{ height:280px; border-radius:10px; overflow:hidden; border:1px solid var(--border-soft); background:var(--bg-inset); }
+.route-map{ height:280px; border-radius:6px; overflow:hidden; border:1px solid var(--border-soft); background:var(--bg-inset); }
 .route-map .empty{ padding:16px; }
 /* Recolor the stock OSM tiles to sit inside the dark console instead of
    dropping a bright white rectangle into the page. Only applied to the plain-
@@ -1802,14 +1836,14 @@ footer .update-note b{ color:var(--text-muted); }
 .chart-expand-btn{ position:absolute; top:8px; right:8px; width:26px; height:26px; display:flex; align-items:center; justify-content:center; background:var(--bg-raised); border:1px solid var(--border); border-radius:6px; color:var(--text-dim); font-size:13px; line-height:1; cursor:pointer; opacity:0.55; transition:opacity .15s, color .15s, border-color .15s; z-index:2; }
 .chart-expand-btn:hover, .chart-expand-btn:focus-visible{ opacity:1; color:var(--text); border-color:var(--text-dim); }
 .chart-zoom-overlay{ align-items:center; z-index:1200; }
-.chart-zoom-panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:14px; width:min(96vw,1140px); max-height:92vh; padding:14px 16px 12px; display:flex; flex-direction:column; margin:0; overflow-y:auto; }
+.chart-zoom-panel{ background:var(--bg-panel); border:1px solid var(--border); border-radius:6px; width:min(96vw,1140px); max-height:92vh; padding:14px 16px 12px; display:flex; flex-direction:column; margin:0; overflow-y:auto; }
 .chart-zoom-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .chart-zoom-title{ font-family:var(--font-display); font-weight:700; font-size:15px; text-wrap:balance; }
 .chart-zoom-close-btn{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:var(--bg-raised); border:1px solid var(--border); border-radius:7px; color:var(--text-muted); font-size:19px; line-height:1; cursor:pointer; flex-shrink:0; }
 .chart-zoom-close-btn:hover{ color:var(--text); border-color:var(--text-dim); }
 #chart-zoom-toolbar-slot{ margin-top:10px; }
 #chart-zoom-toolbar-slot .chart-toolbar{ margin-bottom:0; }
-#chart-zoom-box{ margin-top:8px; height:min(68vh,560px); border:1px solid var(--border-soft); border-radius:10px; background:var(--bg-inset); }
+#chart-zoom-box{ margin-top:8px; height:min(68vh,560px); border:1px solid var(--border-soft); border-radius:4px; background:var(--bg-inset); }
 .chart-zoom-hint{ margin-top:8px; font-size:11px; color:var(--text-dim); text-align:center; }
 """
 
@@ -1817,7 +1851,13 @@ JS = r"""
 function paceStr(min){ if(min==null) return '—'; const m=Math.floor(min), s=Math.round((min-m)*60); return `${m}:${s.toString().padStart(2,'0')}`; }
 function durStr(min){ const t=Math.round(min*60), h=Math.floor(t/3600), m=Math.floor((t%3600)/60), s=t%60; return h>0?`${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`:`${m}:${s.toString().padStart(2,'0')}`; }
 function fmtDate(d){ return new Date(d+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
-const TYPE_COLORS = {'Long Run':'#6690c4','Easy Run':'#8b95a1','Tempo':'#e3a857','Speed':'#c1614a','Benchmark':'#5fa8a0','Strides':'#5c6570'};
+const TYPE_COLORS = {'Long Run':'#45D6B0','Easy Run':'#7E8EA3','Tempo':'#FFB020','Speed':'#FF5A64','Benchmark':'#9B8CFF','Strides':'#57636F'};
+// Sequential ramp for the Weekly Volume bars — one hue, light→dark, so the
+// tallest (peak-mileage) week reads as deepest and darkest rather than every
+// bar being a flat, identically-saturated block (see the dataviz guidance on
+// sequential-for-magnitude encodings).
+const VOL_RAMP = ['#0F3D4D','#0F4757','#14627A','#0D7FA0','#0093BC','#00A0CC','#00B4E0'];
+function rampColor(frac, ramp){ const i=Math.round(Math.max(0,Math.min(1,frac))*(ramp.length-1)); return ramp[i]; }
 function safe(name, fn){ try{ fn(); } catch(e){ console.error('Section failed:', name, e); const el=document.getElementById('boot-errors'); if(el){ el.style.display='block'; el.innerHTML += `<div>Section "${name}" failed: ${e.message}</div>`; } } }
 const SVGNS='http://www.w3.org/2000/svg';
 function el(tag, attrs){ const e=document.createElementNS(SVGNS,tag); for(const k in attrs) e.setAttribute(k, attrs[k]); return e; }
@@ -2154,13 +2194,13 @@ function renderVolumeWindow(container, weekly, view){
   const clip=el('clipPath',{id:clipId}); clip.appendChild(el('rect',{x:M.left,y:M.top,width:plotW,height:plotH})); svg.appendChild(clip);
   visibleIdx.forEach((i,k)=>{
     const w=weekly[i], cx=xCenter(i), mBarX=cx-milesBarW-2, mBarY=yScale(w.miles);
-    const mBar=el('rect',{class:'data-point',x:mBarX,y:mBarY,width:milesBarW,height:(M.top+plotH)-mBarY,fill:'#e3a857',rx:2});
+    const mBar=el('rect',{class:'data-point',x:mBarX,y:mBarY,width:milesBarW,height:(M.top+plotH)-mBarY,fill:rampColor(w.miles/maxMiles,VOL_RAMP),rx:2});
     mBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Miles: <b>${w.miles.toFixed(1)}</b></div><div class="tt-row">Runs: <b>${w.runs}</b></div>${w.longRunMiles?`<div class="tt-row">Long run: <b>${w.longRunMiles.toFixed(1)}mi</b></div>`:''}`));
     mBar.addEventListener('mousemove',positionTooltip); mBar.addEventListener('mouseleave',hideTooltip);
     svg.appendChild(mBar);
     if(w.longRunMiles){
       const lrBarX=cx+2, lrBarY=yScale(w.longRunMiles);
-      const lrBar=el('rect',{class:'data-point',x:lrBarX,y:lrBarY,width:lrBarW,height:(M.top+plotH)-lrBarY,fill:'#6690c4',rx:2});
+      const lrBar=el('rect',{class:'data-point',x:lrBarX,y:lrBarY,width:lrBarW,height:(M.top+plotH)-lrBarY,fill:'#45D6B0',rx:2});
       lrBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Long run: <b>${w.longRunMiles.toFixed(1)}mi</b></div>`));
       lrBar.addEventListener('mousemove',positionTooltip); lrBar.addEventListener('mouseleave',hideTooltip);
       svg.appendChild(lrBar);
@@ -2168,8 +2208,8 @@ function renderVolumeWindow(container, weekly, view){
     if(volLabels.has(k)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.label; svg.appendChild(xl); }
   });
   let linePath=''; visibleIdx.forEach((i,k)=>{ const x=xCenter(i), y=y1Scale(weekly[i].runs); linePath+=(k===0?'M':'L')+x+','+y+' '; });
-  svg.appendChild(el('path',{d:linePath.trim(),fill:'none',stroke:'#5fa8a0','stroke-width':2,'clip-path':`url(#${clipId})`}));
-  visibleIdx.forEach(i=>{ const w=weekly[i]; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:y1Scale(w.runs),r:3.5,fill:'#5fa8a0'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Runs: <b>${w.runs}</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  svg.appendChild(el('path',{d:linePath.trim(),fill:'none',stroke:'#2FD480','stroke-width':2,'clip-path':`url(#${clipId})`}));
+  visibleIdx.forEach(i=>{ const w=weekly[i]; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:y1Scale(w.runs),r:3.5,fill:'#2FD480'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Runs: <b>${w.runs}</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
   container.appendChild(svg);
@@ -2201,13 +2241,13 @@ function renderPlanWindow(container, planWeeks, view){
   visibleIdx.forEach((i,k)=>{
     const w=planWeeks[i], cx=xCenter(i);
     const pBarX=cx-plannedBarW-2, pBarY=yScale(w.plannedMi||0);
-    const pBar=el('rect',{class:'data-point',x:pBarX,y:pBarY,width:plannedBarW,height:(M.top+plotH)-pBarY,fill:'#8b95a1',rx:2});
+    const pBar=el('rect',{class:'data-point',x:pBarX,y:pBarY,width:plannedBarW,height:(M.top+plotH)-pBarY,fill:'#7E8EA3',rx:2});
     pBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.weekLabel}</div><div class="tt-row">${w.phase}</div><div class="tt-row">Planned: <b>${(w.plannedMi||0).toFixed(1)}mi</b></div>`));
     pBar.addEventListener('mousemove',positionTooltip); pBar.addEventListener('mouseleave',hideTooltip);
     svg.appendChild(pBar);
     if(w.actualMi!=null){
       const aBarX=cx+2, aBarY=yScale(w.actualMi);
-      const aBar=el('rect',{class:'data-point',x:aBarX,y:aBarY,width:actualBarW,height:(M.top+plotH)-aBarY,fill:'#e3a857',rx:2});
+      const aBar=el('rect',{class:'data-point',x:aBarX,y:aBarY,width:actualBarW,height:(M.top+plotH)-aBarY,fill:'#00B4E0',rx:2});
       aBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.weekLabel}</div><div class="tt-row">${w.phase}</div><div class="tt-row">Actual: <b>${w.actualMi.toFixed(1)}mi</b></div>${w.adherencePct!=null?`<div class="tt-row">Adherence: <b>${w.adherencePct}%</b></div>`:''}`));
       aBar.addEventListener('mousemove',positionTooltip); aBar.addEventListener('mouseleave',hideTooltip);
       svg.appendChild(aBar);
@@ -2250,8 +2290,8 @@ function renderPaceWindow(container, runs, view){
   const clipId='pace-clip-'+Math.random().toString(36).slice(2);
   const clip=el('clipPath',{id:clipId}); clip.appendChild(el('rect',{x:M.left,y:M.top,width:plotW,height:plotH})); svg.appendChild(clip);
   let path=''; visibleIdx.forEach((i,k)=>{ path+=(k===0?'M':'L')+xScale(i)+','+yScale(rolling[i])+' '; });
-  svg.appendChild(el('path',{d:path.trim(),fill:'none',stroke:'#e7e9ec','stroke-width':1.5,'stroke-dasharray':'4,3','clip-path':`url(#${clipId})`}));
-  visibleIdx.forEach(i=>{ const r=runs[i]; const c=el('circle',{class:'data-point',cx:xScale(i),cy:yScale(r.paceMinMi),r:5,fill:TYPE_COLORS[r.type]||'#8b95a1'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${r.name}</div><div class="tt-row">${fmtDate(r.date)} · ${r.type}</div><div class="tt-row">Pace: <b>${paceStr(r.paceMinMi)}/mi</b></div><div class="tt-row">Dist: <b>${r.distMi.toFixed(1)}mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  svg.appendChild(el('path',{d:path.trim(),fill:'none',stroke:'#E6EDF5','stroke-width':1.5,'stroke-dasharray':'4,3','clip-path':`url(#${clipId})`}));
+  visibleIdx.forEach(i=>{ const r=runs[i]; const c=el('circle',{class:'data-point',cx:xScale(i),cy:yScale(r.paceMinMi),r:5,fill:TYPE_COLORS[r.type]||'#7E8EA3'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${r.name}</div><div class="tt-row">${fmtDate(r.date)} · ${r.type}</div><div class="tt-row">Pace: <b>${paceStr(r.paceMinMi)}/mi</b></div><div class="tt-row">Dist: <b>${r.distMi.toFixed(1)}mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
   container.appendChild(svg);
@@ -2357,7 +2397,7 @@ function renderSplitsWindow(container, splits, view, legendId, elevProfile, mile
   // ---- Elevation: a sub-mile altitude trace when Garmin returned one for this run,
   // a per-mile gain line otherwise. Either way it's drawn first so pace/HR sit
   // visually on top of it, and rescaled to just the points inside the window.
-  const elevColor='#7c8a9e';
+  const elevColor='#5B7A99';
   const hasProfile = Array.isArray(elevProfile) && elevProfile.length>=6;
   let elevPts;
   if(hasProfile){
@@ -2389,13 +2429,36 @@ function renderSplitsWindow(container, splits, view, legendId, elevProfile, mile
     svg.appendChild(hit);
     if(mileLabels.has(i)){ const xl=el('text',{x:xCenter(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent = isSemanticLabel(s) ? s.mile : (mileBased?'Mi ':'Lap ')+s.mile; svg.appendChild(xl); }
   });
-  let pacePath=''; visibleIdx.forEach((i,k)=>{ pacePath+=(k===0?'M':'L')+xCenter(i)+','+yPace(splits[i].pace)+' '; });
-  svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2.5,'clip-path':`url(#${clipId})`}));
-  visibleIdx.forEach(i=>{ const s=splits[i]; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yPace(s.pace),r:4.5,fill:'#e3a857'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Pace: <b>${paceStr(s.pace)}/mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+  // v14 fix: a split's pace can genuinely be missing (null, from a lap whose
+  // distance/duration didn't support computing one) — treating that as "0"
+  // used to plot a fake dot at the pace-0 axis floor and draw the line
+  // straight down to it (the same garbled-value bug, resurfacing at the
+  // rendering layer even after the Python side stopped faking a 0). Only
+  // plot points with a real pace, and break the line rather than bridging
+  // straight across a gap, so a missing lap shows as a genuine gap instead
+  // of a fabricated value.
+  let pacePath=''; let pacePenDown=false;
+  visibleIdx.forEach(i=>{
+    const p=splits[i].pace;
+    if(p==null){ pacePenDown=false; return; }
+    pacePath+=(pacePenDown?'L':'M')+xCenter(i)+','+yPace(p)+' ';
+    pacePenDown=true;
+  });
+  svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#00B4E0','stroke-width':2.5,'clip-path':`url(#${clipId})`}));
+  visibleIdx.forEach(i=>{ const s=splits[i]; if(s.pace==null) return; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yPace(s.pace),r:4.5,fill:'#00B4E0'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Pace: <b>${paceStr(s.pace)}/mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   if(hrs.length){
-    let hrPath=''; visibleIdx.forEach((i,k)=>{ hrPath+=(k===0?'M':'L')+xCenter(i)+','+yHr(splits[i].avgHr||hrMin)+' '; });
-    svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#c1614a','stroke-width':2.5,'clip-path':`url(#${clipId})`}));
-    visibleIdx.forEach(i=>{ const s=splits[i]; if(!s.avgHr) return; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yHr(s.avgHr),r:4.5,fill:'#c1614a'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Avg HR: <b>${s.avgHr} bpm</b></div>${s.maxHr?`<div class="tt-row">Max HR: <b>${s.maxHr} bpm</b></div>`:''}`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
+    // same gap-instead-of-fake-zero treatment as the pace line above: a lap
+    // with no recorded HR falls back to the axis floor otherwise, which reads
+    // as an impossible "0 bpm" dip rather than genuinely missing data.
+    let hrPath=''; let hrPenDown=false;
+    visibleIdx.forEach(i=>{
+      const h=splits[i].avgHr;
+      if(!h){ hrPenDown=false; return; }
+      hrPath+=(hrPenDown?'L':'M')+xCenter(i)+','+yHr(h)+' ';
+      hrPenDown=true;
+    });
+    svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#FF5A64','stroke-width':2.5,'clip-path':`url(#${clipId})`}));
+    visibleIdx.forEach(i=>{ const s=splits[i]; if(!s.avgHr) return; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:yHr(s.avgHr),r:4.5,fill:'#FF5A64'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Avg HR: <b>${s.avgHr} bpm</b></div>${s.maxHr?`<div class="tt-row">Max HR: <b>${s.maxHr} bpm</b></div>`:''}`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   }
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
@@ -2405,7 +2468,7 @@ function renderSplitsWindow(container, splits, view, legendId, elevProfile, mile
   if(legendId){
     const lg=document.getElementById(legendId);
     if(lg){
-      const legendItems=[{c:'#e3a857',t:'Pace'},{c:'#c1614a',t:'Avg HR'},{c:elevColor,t:hasProfile?'Elevation':'Elevation gain'}];
+      const legendItems=[{c:'#00B4E0',t:'Pace'},{c:'#FF5A64',t:'Avg HR'},{c:elevColor,t:hasProfile?'Elevation':'Elevation gain'}];
       lg.innerHTML = legendItems.map(it=>`<div class="legend-item"><span class="legend-swatch" style="background:${it.c}"></span>${it.t}</div>`).join('');
     }
   }
@@ -2423,10 +2486,10 @@ function renderSplitsWindow(container, splits, view, legendId, elevProfile, mile
 // renderSplitsChart above (via registerSplitsChart below) whenever this data
 // isn't there for a given run.
 function segKindColor(label){
-  if(label==='Warm Up' || label==='Cool Down') return '#5c6570';
-  if(label.startsWith('Interval')) return '#c1614a';
-  if(label.startsWith('Recovery')) return '#6690c4';
-  return '#5c6570';
+  if(label==='Warm Up' || label==='Cool Down') return '#57636F';
+  if(label.startsWith('Interval')) return '#00B4E0';
+  if(label.startsWith('Recovery')) return '#45D6B0';
+  return '#57636F';
 }
 function fmtElapsed(sec){
   sec = Math.max(0, Math.round(sec));
@@ -2473,7 +2536,7 @@ function renderIntervalTimeWindow(container, timeSeries, view, legendId){
     if(text){
       const cx=(x0+x1)/2;
       const estW = text.length*6.4+10;
-      svg.appendChild(el('rect',{x:cx-estW/2,y:M.top+3,width:estW,height:15,rx:3,fill:'#0d1013',"fill-opacity":0.72}));
+      svg.appendChild(el('rect',{x:cx-estW/2,y:M.top+3,width:estW,height:15,rx:3,fill:'#0B1017',"fill-opacity":0.72}));
       const lbl=el('text',{x:cx,y:M.top+14,'text-anchor':'middle'});
       lbl.style.fill = color; lbl.style.fontWeight = '600'; lbl.textContent=text;
       svg.appendChild(lbl);
@@ -2495,10 +2558,15 @@ function renderIntervalTimeWindow(container, timeSeries, view, legendId){
   });
 
   let pacePath=''; finePts.forEach((p,i)=>{ pacePath+=(i===0?'M':'L')+xScale(p.t)+','+yPace(p.pace)+' '; });
-  svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#e3a857','stroke-width':2,'clip-path':`url(#${clipId})`}));
+  svg.appendChild(el('path',{d:pacePath.trim(),fill:'none',stroke:'#00B4E0','stroke-width':2,'clip-path':`url(#${clipId})`}));
   if(hasHr){
-    let hrPath=''; finePts.forEach((p,i)=>{ hrPath+=(i===0?'M':'L')+xScale(p.t)+','+yHr(p.hr||hrMin)+' '; });
-    svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#c1614a','stroke-width':2,'clip-path':`url(#${clipId})`}));
+    let hrPath=''; let hrPenDown=false;
+    finePts.forEach(p=>{
+      if(!p.hr){ hrPenDown=false; return; }
+      hrPath+=(hrPenDown?'L':'M')+xScale(p.t)+','+yHr(p.hr)+' ';
+      hrPenDown=true;
+    });
+    svg.appendChild(el('path',{d:hrPath.trim(),fill:'none',stroke:'#FF5A64','stroke-width':2,'clip-path':`url(#${clipId})`}));
   }
 
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
@@ -2508,9 +2576,9 @@ function renderIntervalTimeWindow(container, timeSeries, view, legendId){
   if(legendId){
     const lg=document.getElementById(legendId);
     if(lg){
-      const items=[{c:'#e3a857',t:'Pace'}];
-      if(hasHr) items.push({c:'#c1614a',t:'Avg HR'});
-      items.push({c:'#5c6570',t:'Warm up / Cool down'},{c:'#c1614a',t:'Interval'},{c:'#6690c4',t:'Recovery'});
+      const items=[{c:'#00B4E0',t:'Pace'}];
+      if(hasHr) items.push({c:'#FF5A64',t:'Avg HR'});
+      items.push({c:'#57636F',t:'Warm up / Cool down'},{c:'#00B4E0',t:'Interval'},{c:'#45D6B0',t:'Recovery'});
       lg.innerHTML = items.map(it=>`<div class="legend-item"><span class="legend-swatch" style="background:${it.c}"></span>${it.t}</div>`).join('');
     }
   }
@@ -2577,9 +2645,9 @@ function renderRouteMap(containerId, points){
       attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
     }).addTo(map);
   }
-  const line=L.polyline(latlngs,{color:'#e3a857',weight:4,opacity:0.95,lineJoin:'round',lineCap:'round'}).addTo(map);
-  L.circleMarker(latlngs[0],{radius:6,color:'#12151a',weight:2,fillColor:'#5fa8a0',fillOpacity:1}).addTo(map).bindTooltip('Start');
-  L.circleMarker(latlngs[latlngs.length-1],{radius:6,color:'#12151a',weight:2,fillColor:'#c1614a',fillOpacity:1}).addTo(map).bindTooltip('Finish');
+  const line=L.polyline(latlngs,{color:'#00B4E0',weight:4,opacity:0.95,lineJoin:'round',lineCap:'round'}).addTo(map);
+  L.circleMarker(latlngs[0],{radius:6,color:'#0E141C',weight:2,fillColor:'#2FD480',fillOpacity:1}).addTo(map).bindTooltip('Start');
+  L.circleMarker(latlngs[latlngs.length-1],{radius:6,color:'#0E141C',weight:2,fillColor:'#FF5A64',fillOpacity:1}).addTo(map).bindTooltip('Finish');
   map.fitBounds(line.getBounds(),{padding:[18,18]});
   ROUTE_MAP_INSTANCES[containerId]=map;
 }
@@ -2597,9 +2665,9 @@ function redrawCharts(){
   safe('redraw volume', ()=>registerVolumeChart('chart-volume', 'Weekly Volume & Training Load', DATA.weekly));
   safe('redraw plan', ()=>registerPlanChart('chart-plan', 'Plan vs. Actual', DATA.planComparison));
   safe('redraw pace', ()=>{ if(PACED_RUNS_ASC) registerPaceChart('chart-pace', 'Pace Progression', PACED_RUNS_ASC); });
-  safe('redraw hrv', ()=>{ if(HRV_PTS) registerSeriesChart('chart-hrv', 'HRV Trend', HRV_PTS, 'hrv', '#5fa8a0'); });
-  safe('redraw vo2', ()=>{ if(VO2_PTS) registerSeriesChart('chart-vo2', 'VO2 Max Trend', VO2_PTS, 'vo2', '#e3a857'); });
-  safe('redraw efficiency', ()=>{ if(EF_PTS) registerSeriesChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', EF_PTS, 'ef', '#5fa8a0'); });
+  safe('redraw hrv', ()=>{ if(HRV_PTS) registerSeriesChart('chart-hrv', 'HRV Trend', HRV_PTS, 'hrv', '#2FD480'); });
+  safe('redraw vo2', ()=>{ if(VO2_PTS) registerSeriesChart('chart-vo2', 'VO2 Max Trend', VO2_PTS, 'vo2', '#00B4E0'); });
+  safe('redraw efficiency', ()=>{ if(EF_PTS) registerSeriesChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', EF_PTS, 'ef', '#2FD480'); });
   safe('redraw splits', ()=>{ if(ACTIVE_SPLIT_ID && DATA.longRuns[ACTIVE_SPLIT_ID]){ const lr=DATA.longRuns[ACTIVE_SPLIT_ID]; registerSplitsChart('chart-splits', `Long Run Splits — ${lr.label}`, lr.splits, 'splits-legend', lr.elevProfile, lr.mileBased, lr.timeSeries); } });
   Object.values(ROUTE_MAP_INSTANCES).forEach(m=>{ try{ m.invalidateSize(); }catch(e){} });
   // If a chart is currently expanded in the zoom modal, its container was
@@ -2694,7 +2762,7 @@ safe('pace progression chart', function(){
   PACED_RUNS_ASC = runsAsc.filter(r=>r.paceMinMi);
   registerPaceChart('chart-pace', 'Pace Progression', PACED_RUNS_ASC);
   const types = [...new Set(DATA.runs.map(r=>r.type))];
-  document.getElementById('pace-legend').innerHTML = types.map(t=>`<div class="legend-item"><span class="legend-swatch" style="background:${TYPE_COLORS[t]}"></span>${t}</div>`).join('') + `<div class="legend-item"><span class="legend-swatch" style="background:#e7e9ec"></span>5-run rolling avg</div>`;
+  document.getElementById('pace-legend').innerHTML = types.map(t=>`<div class="legend-item"><span class="legend-swatch" style="background:${TYPE_COLORS[t]}"></span>${t}</div>`).join('') + `<div class="legend-item"><span class="legend-swatch" style="background:#E6EDF5"></span>5-run rolling avg</div>`;
 });
 
 safe('insights', function(){
@@ -2706,19 +2774,22 @@ safe('insights', function(){
 safe('recovery panel', function(){
   const r = DATA.trainingReadiness;
   document.getElementById('readiness-score').textContent = r&&r.score!=null ? r.score : '—';
+  const RING_C = 2*Math.PI*46;
+  const ringFrac = (r&&r.score!=null) ? Math.max(0,Math.min(100,r.score))/100 : 0;
+  document.getElementById('readiness-ring-fill').setAttribute('stroke-dasharray', (ringFrac*RING_C).toFixed(1)+' '+RING_C.toFixed(1));
   const level = r&&r.level ? String(r.level) : null;
   const levelClass = level==='HIGH' ? 'high' : (level==='MODERATE' ? 'moderate' : (level ? 'low-warn' : ''));
   document.getElementById('readiness-badge').outerHTML = `<span class="badge ${levelClass}" id="readiness-badge">${level ? level.replace(/_/g,' ') : '—'}</span>`;
   document.getElementById('training-status-badge').textContent = DATA.trainingStatusFeedback || '—';
   document.getElementById('training-acwr').textContent = DATA.acwr!=null ? `ACWR ${DATA.acwr.toFixed(2)}` : '';
   HRV_PTS = DATA.hrv.filter(p=>typeof p.hrv==='number');
-  registerSeriesChart('chart-hrv', 'HRV Trend', HRV_PTS, 'hrv', '#5fa8a0');
+  registerSeriesChart('chart-hrv', 'HRV Trend', HRV_PTS, 'hrv', '#2FD480');
   const mix = DATA.loadMix;
   if(mix){
     const rows = [
-      { name:'Easy', pct:mix.easyPct, min:mix.easyMin, color:'#8b95a1', targetMin:65, targetMax:85 },
-      { name:'Moderate', pct:mix.moderatePct, min:mix.moderateMin, color:'#e3a857', targetMin:5, targetMax:20 },
-      { name:'Hard', pct:mix.hardPct, min:mix.hardMin, color:'#c1614a', targetMin:5, targetMax:15 },
+      { name:'Easy', pct:mix.easyPct, min:mix.easyMin, color:'#7E8EA3', targetMin:65, targetMax:85 },
+      { name:'Moderate', pct:mix.moderatePct, min:mix.moderateMin, color:'#00B4E0', targetMin:5, targetMax:20 },
+      { name:'Hard', pct:mix.hardPct, min:mix.hardMin, color:'#FF5A64', targetMin:5, targetMax:15 },
     ];
     document.getElementById('balance-bars').innerHTML = rows.map(r=>`
       <div class="balance-row">
@@ -2746,8 +2817,8 @@ safe('fitness trend', function(){
   `;
   VO2_PTS = DATA.vo2max.filter(p=>typeof p.vo2==='number');
   EF_PTS = DATA.efficiencyTrend.filter(p=>typeof p.ef==='number');
-  registerSeriesChart('chart-vo2', 'VO2 Max Trend', VO2_PTS, 'vo2', '#e3a857');
-  registerSeriesChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', EF_PTS, 'ef', '#5fa8a0');
+  registerSeriesChart('chart-vo2', 'VO2 Max Trend', VO2_PTS, 'vo2', '#00B4E0');
+  registerSeriesChart('chart-efficiency', 'Aerobic Efficiency — Easy & Long Runs', EF_PTS, 'ef', '#2FD480');
 });
 
 safe('long run splits', function(){
@@ -2852,7 +2923,7 @@ safe('run detail modal', function(){
         ${stat('Elev Gain', '+'+(run.elevGainFt??0), 'ft')}
       </div>
       <div class="modal-section-title">Route</div>
-      ${route && route.length>1 ? `<div class="route-map" id="modal-route"></div><div class="route-legend"><span><span style="color:#5fa8a0;">●</span> Start</span><span><span style="color:#c1614a;">●</span> Finish</span></div>` : `<p class="empty">No GPS route available for this run.</p>`}
+      ${route && route.length>1 ? `<div class="route-map" id="modal-route"></div><div class="route-legend"><span><span style="color:#2FD480;">●</span> Start</span><span><span style="color:#FF5A64;">●</span> Finish</span></div>` : `<p class="empty">No GPS route available for this run.</p>`}
       <div class="modal-section-title">${splitsSectionTitle}</div>
       ${splits.length ? `
         <div class="chart-box" style="height:220px;"><div id="modal-splits-chart" class="svg-chart"></div></div>

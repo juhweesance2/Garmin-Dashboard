@@ -2,11 +2,19 @@ name: Update Garmin Dashboard
 
 on:
   schedule:
-    - cron: '0 11 * * *'   # runs daily at 11:00 UTC — adjust to your preferred time
-  workflow_dispatch:        # adds a manual "Run workflow" button
+    # Twice daily. Cron is in UTC; times below are Pacific.
+    # Minute 17 (not :00) avoids GitHub's top-of-hour congestion, which can delay runs.
+    - cron: '17 14 * * *'   # ~7:17am PDT (6:17am PST after Nov 1): captures overnight sleep/HRV/readiness
+    - cron: '17 2 * * *'    # ~7:17pm PDT (6:17pm PST after Nov 1): captures the day's run
+  workflow_dispatch:        # manual "Run workflow" button still works
 
 permissions:
   contents: write
+
+# Prevents a manual run and a scheduled run from overlapping and colliding on git push.
+concurrency:
+  group: garmin-dashboard-update
+  cancel-in-progress: false
 
 jobs:
   update:
@@ -17,11 +25,14 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: pip install garminconnect
+        run: pip install garminconnect "gspread>=6"
       - name: Run update script
         env:
           GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+          CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}     # optional (v10)
+          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}   # Google Sheets export; export skips if unset
+          SHEET_ID: ${{ secrets.SHEET_ID }}
         run: python update_dashboard.py
       - name: Commit updated dashboard
         run: |
@@ -29,4 +40,5 @@ jobs:
           git config user.email "actions@github.com"
           git add index.html
           git commit -m "Auto-update dashboard" || echo "No changes to commit"
+          git pull --rebase origin main
           git push

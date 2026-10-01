@@ -2340,7 +2340,23 @@ function makeZoomChart({containerId, container}){
     const inst = self();
     if(!inst) return;
     container.innerHTML='';
-    inst.renderFn(container, inst.data, view);
+    // v15 hotfix: this fires inside requestAnimationFrame (see scheduleRender
+    // below), one tick after the code that called registerZoomChart/reset()
+    // has already returned — so a try/catch wrapped around THAT caller (as
+    // openRunModal's route/splits calls now have) never sees an exception
+    // thrown in here; it becomes a silent uncaught rejection in a detached
+    // callback, and since container.innerHTML was already cleared above, the
+    // chart is left permanently blank with nothing on the page to explain why
+    // — only a console error nobody's watching for. This is the shared
+    // render path for EVERY zoomable chart (all 6 main dashboard charts, Long
+    // Run Splits, and the run-detail modal's own splits/interval chart), so
+    // catching it here hardens all of them at once, not just one.
+    try{
+      inst.renderFn(container, inst.data, view);
+    }catch(e){
+      console.error('Chart render failed:', containerId, e);
+      container.innerHTML = `<p class="empty">This chart failed to render — ${e.message}. Check the browser console (F12 → Console) for the full error.</p>`;
+    }
     const zoomed = (view.end-view.start) < domN()-1e-6;
     container.classList.toggle('zoomed', zoomed);
     const rangeEl = document.getElementById(containerId+'-range');
@@ -2724,6 +2740,15 @@ function registerSeriesChart(containerId, title, pts, valueKey, color){
 }
 
 let SPLITS_SYNC_TARGETS = {};
+// v15 hotfix — a click PINS the synced point instead of only previewing it on
+// hover: keyed by syncId, holds the fraction-of-total-distance that was
+// explicitly clicked (on either the chart or the map), or null when nothing
+// is pinned. A pinned point ignores the normal hover-driven .clear() calls
+// from both sides, so it stays put after the pointer moves away — mouse users
+// get hover-as-before plus a way to hold a point in place, and touch users
+// (who have no real hover) get a point that sticks after a tap. Clicking the
+// SAME already-pinned point again un-pins it.
+let SYNC_PINNED = {};
 function renderSplitsWindow(container, splits, view, legendId, elevProfile, mileBased, syncId){
   if(mileBased===undefined) mileBased=true; // older cached data with no flag — assume the common case
   if(!splits.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; if(legendId){ const lg=document.getElementById(legendId); if(lg) lg.innerHTML=''; } return; }
@@ -2807,10 +2832,18 @@ function renderSplitsWindow(container, splits, view, legendId, elevProfile, mile
   const splitTitle = s => { const word = isSemanticLabel(s) ? s.mile : `${labelWord} ${s.mile}`; return mileBased ? word : `${word}${s.distMi!=null?` · ${s.distMi.toFixed(2)}mi`:''}`; };
   visibleIdx.forEach(i=>{
     const s=splits[i], x0=distScale(cum[i]), x1=distScale(cum[i+1]);
+    const frac = ((cum[i]+cum[i+1])/2)/(cum[cum.length-1]||1);
     const hit=el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,1),height:plotH,fill:'transparent'});
-    hit.addEventListener('mouseenter',e=>{ showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`); if(syncId && ROUTE_SYNC_TARGETS[syncId]) ROUTE_SYNC_TARGETS[syncId].setFraction(((cum[i]+cum[i+1])/2)/(cum[cum.length-1]||1)); });
+    hit.addEventListener('mouseenter',e=>{ showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`); if(syncId && ROUTE_SYNC_TARGETS[syncId]) ROUTE_SYNC_TARGETS[syncId].setFraction(frac); });
     hit.addEventListener('mousemove',positionTooltip);
-    hit.addEventListener('mouseleave',()=>{ hideTooltip(); if(syncId && ROUTE_SYNC_TARGETS[syncId]) ROUTE_SYNC_TARGETS[syncId].clear(); });
+    // A pinned point (see SYNC_PINNED doc comment) ignores the hover-driven
+    // clear — only an explicit click (below) or clicking elsewhere moves it.
+    hit.addEventListener('mouseleave',()=>{ hideTooltip(); if(syncId && ROUTE_SYNC_TARGETS[syncId] && SYNC_PINNED[syncId]!==frac) ROUTE_SYNC_TARGETS[syncId].clear(); });
+    hit.addEventListener('click',()=>{
+      if(!syncId || !ROUTE_SYNC_TARGETS[syncId]) return;
+      if(SYNC_PINNED[syncId]===frac){ SYNC_PINNED[syncId]=null; ROUTE_SYNC_TARGETS[syncId].clear(); }
+      else { SYNC_PINNED[syncId]=frac; ROUTE_SYNC_TARGETS[syncId].setFraction(frac); }
+    });
     svg.appendChild(hit);
     if(mileLabels.has(i)){ const xl=el('text',{x:xCenter(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent = isSemanticLabel(s) ? s.mile : (mileBased?'Mi ':'Lap ')+s.mile; svg.appendChild(xl); }
   });
@@ -3110,13 +3143,29 @@ function renderRouteMap(containerId, points, opts){
       L.polyline([latlngs[i],latlngs[i+1]], {color, weight:4.5, opacity:0.95, lineCap:'round', interactive:false}).addTo(segGroup);
       if(opts.syncId){
         const hit = L.polyline([latlngs[i],latlngs[i+1]], {opacity:0, weight:22, lineCap:'round'}).addTo(segGroup);
-        hit.on('mouseover', ()=>{
+        const show = () => {
           if(SPLITS_SYNC_TARGETS[opts.syncId]) SPLITS_SYNC_TARGETS[opts.syncId].setFraction(midFrac);
           if(readout){ readout.textContent = pace!=null ? `${paceStr(pace)}/mi` : '—'; readout.classList.add('show'); }
-        });
+        };
+        hit.on('mouseover', show);
+        // A pinned point (see SYNC_PINNED doc comment, above renderSplitsWindow)
+        // ignores the hover-driven clear here too — same click-to-hold behavior
+        // as the splits chart's own hit rects, and the one that actually makes
+        // this usable on a touch device, which has no real hover at all.
         hit.on('mouseout', ()=>{
+          if(SYNC_PINNED[opts.syncId]===midFrac) return;
           if(SPLITS_SYNC_TARGETS[opts.syncId]) SPLITS_SYNC_TARGETS[opts.syncId].clear();
           if(readout) readout.classList.remove('show');
+        });
+        hit.on('click', ()=>{
+          if(SYNC_PINNED[opts.syncId]===midFrac){
+            SYNC_PINNED[opts.syncId]=null;
+            if(SPLITS_SYNC_TARGETS[opts.syncId]) SPLITS_SYNC_TARGETS[opts.syncId].clear();
+            if(readout) readout.classList.remove('show');
+          } else {
+            SYNC_PINNED[opts.syncId]=midFrac;
+            show();
+          }
         });
       }
     }
@@ -3542,13 +3591,44 @@ safe('run detail modal', function(){
     prevBtn.disabled = !(navIdx>=0 && navIdx<navListNow.length-1);
     nextBtn.disabled = !(navIdx>0);
     const syncId = (route && route.length>1 && splits.length) ? 'modal' : null;
-    if(route && route.length>1) renderRouteMap('modal-route', route, {splits, mileBased, syncId, readoutId:'modal-route-readout'});
-    if(splits.length) registerSplitsChart('modal-splits-chart', `${splitsSectionTitle} — ${run.name}`, splits, 'modal-splits-legend', elevProfile, mileBased, detail.timeSeries, syncId);
-    const paceLegendEl = document.getElementById('modal-route-pace-legend');
-    if(paceLegendEl){
-      const paced = mileBased ? splits.filter(s=>s.pace>0) : [];
-      paceLegendEl.innerHTML = paced.length>=2 ? `Faster <span class="ramp"></span> Slower — colored by mile pace` : '';
+    SYNC_PINNED[syncId] = null; // a pin from a previously-viewed run should never carry into this one
+    // Each render call is isolated in its own try/catch, with the real error
+    // message written directly into that section instead of swallowed. Before
+    // this, a failure anywhere inside renderRouteMap (which runs first) would
+    // throw out of openRunModal entirely — openRunModal isn't wrapped by the
+    // page's usual safe() guard, since it's a closure assigned once and then
+    // invoked later from a click handler, outside that original try/catch —
+    // silently skipping registerSplitsChart right along with it and leaving
+    // BOTH the route and the splits/pace/HR/elevation chart blank with
+    // nothing in the UI to say why. Now a bug in one leaves a visible message
+    // in its own section and the OTHER section still renders normally.
+    if(route && route.length>1){
+      try{
+        renderRouteMap('modal-route', route, {splits, mileBased, syncId, readoutId:'modal-route-readout'});
+      }catch(e){
+        console.error('Route map failed to render:', e);
+        const el = document.getElementById('modal-route');
+        if(el) el.innerHTML = `<p class="empty">Route map failed to render — ${e.message}. Check the browser console (F12 → Console) for the full error.</p>`;
+      }
     }
+    if(splits.length){
+      try{
+        registerSplitsChart('modal-splits-chart', `${splitsSectionTitle} — ${run.name}`, splits, 'modal-splits-legend', elevProfile, mileBased, detail.timeSeries, syncId);
+      }catch(e){
+        console.error('Splits chart failed to render:', e);
+        const el = document.getElementById('modal-splits-chart');
+        if(el) el.innerHTML = '';
+        const box = el ? el.closest('.chart-box') : null;
+        if(box) box.insertAdjacentHTML('afterend', `<p class="empty">${splitsSectionTitle} chart failed to render — ${e.message}. Check the browser console (F12 → Console) for the full error.</p>`);
+      }
+    }
+    try{
+      const paceLegendEl = document.getElementById('modal-route-pace-legend');
+      if(paceLegendEl){
+        const paced = mileBased ? splits.filter(s=>s.pace>0) : [];
+        paceLegendEl.innerHTML = paced.length>=2 ? `Faster <span class="ramp"></span> Slower — colored by mile pace` : '';
+      }
+    }catch(e){ console.error('Pace legend failed:', e); }
   };
 });
 """

@@ -3597,19 +3597,49 @@ function renderRouteMap(containerId, points, opts){
   container.innerHTML='';
   const latlngs=points.map(p=>[p[0],p[1]]);
   const map=L.map(container,{scrollWheelZoom:false});
-  // v16 hotfix: Leaflet's own documented guidance for a map created inside an
-  // element that was just made visible (exactly our case — the modal goes
-  // from display:none to display:flex moments before this runs) is to call
-  // invalidateSize() once before relying on the map's computed size for
-  // anything. A map's first getSize() call should measure the live DOM fresh
-  // regardless, so this may not be THE fix for the "t.min"/"reading 'min'"
-  // crash reported from production — I can't confirm that from here, since
-  // this sandbox has no path to real Leaflet or a real browser against the
-  // live site (every CDN/tile host and even the plain npm/pip registries are
-  // blocked by this environment's egress policy, confirmed while debugging
-  // this). It's cheap, harmless, and Leaflet's own recommended practice for
-  // this exact "map inside a modal" shape, so it stays in regardless.
+  // Leaflet's own documented guidance for a map created inside an element
+  // that was just made visible (exactly our case — the modal goes from
+  // display:none to display:flex moments before this runs) is to call
+  // invalidateSize() once before relying on the map's computed size.
   try{ map.invalidateSize(); }catch(e){}
+  // v16 root-cause fix, found from the actual production stack trace (the
+  // "Cannot read properties of undefined (reading 'min')" crash first
+  // "fixed" going into v15 — wrongly, as it turned out, since it still
+  // happened after that fix shipped): it was NEVER in fitBounds() itself.
+  // The real trace pointed at Bounds.intersects, called from deep inside
+  // Polyline._clipPoints, called while a polyline was being added to the
+  // map (LayerGroup.onAdd -> addLayer -> Path.onAdd -> _reset -> _update ->
+  // _clipPoints). That function reads the map's SVG renderer's own pixel
+  // bounds (this._renderer._bounds) — which Leaflet only establishes once
+  // the map has an actual view (a center + zoom from setView/fitBounds).
+  // This code used to add the tile layer, every route polyline, and the
+  // start/finish markers FIRST, and only call fitBounds at the very end —
+  // so every one of those path layers was being added to a map with no
+  // view yet, which is exactly what throws here. Tile layers tolerate that
+  // fine (Leaflet's own examples routinely add them before setView), but
+  // Polyline/CircleMarker — anything rendered through Leaflet's SVG/Canvas
+  // path renderer — do not. The fix is just order: give the map a view
+  // FIRST, before any path layer ever gets added to it.
+  try{
+    map.fitBounds(L.latLngBounds(latlngs), {padding:[18,18]});
+  }catch(boundsErr){
+    console.error('fitBounds failed, falling back to a manual center/zoom:', boundsErr);
+    let minLat=Infinity,maxLat=-Infinity,minLon=Infinity,maxLon=-Infinity,sumLat=0,sumLon=0;
+    latlngs.forEach(([lat,lon])=>{
+      sumLat+=lat; sumLon+=lon;
+      if(lat<minLat)minLat=lat; if(lat>maxLat)maxLat=lat;
+      if(lon<minLon)minLon=lon; if(lon>maxLon)maxLon=lon;
+    });
+    const centerLat=sumLat/latlngs.length, centerLon=sumLon/latlngs.length;
+    const spanDeg=Math.max(maxLat-minLat, maxLon-minLon, 0.0008);
+    // Rough degree-span -> zoom mapping (each zoom level roughly halves the
+    // visible span); clamped to a sane range rather than trusting the formula
+    // at the extremes. This fallback is now mostly a second safety net for
+    // some OTHER, still-unknown bounds failure — the specific crash this was
+    // originally built for is the one fixed above by reordering.
+    const zoom=Math.max(3, Math.min(17, Math.round(14 - Math.log2(spanDeg/0.01))));
+    map.setView([centerLat, centerLon], zoom);
+  }
   // CARTO Voyager (a Google Maps–style basemap) when a key is configured; plain
   // OSM tiles otherwise, so the map still works out of the box before anyone
   // sets one up. The dark-console recolor filter below was built to force OSM's
@@ -3736,40 +3766,6 @@ function renderRouteMap(containerId, points, opts){
   }
   L.circleMarker(latlngs[0],{radius:6,color:'#0E141C',weight:2,fillColor:'#2FD480',fillOpacity:1}).addTo(map).bindTooltip('Start');
   L.circleMarker(latlngs[latlngs.length-1],{radius:6,color:'#0E141C',weight:2,fillColor:'#FF5A64',fillOpacity:1}).addTo(map).bindTooltip('Finish');
-  // v15 hotfix, UPDATE for v16: the v15 fix below (building bounds via
-  // L.latLngBounds() instead of an unattached polyline's own .getBounds())
-  // was written on the theory that the earlier approach was the problem. It
-  // shipped, and the exact same failure came back in production anyway —
-  // "Route map failed to render — Cannot read properties of undefined
-  // (reading 'min')" — meaning v15's theory of the cause was wrong, or
-  // incomplete, and this call can still throw from inside Leaflet's own
-  // internals for a reason not yet confirmed. No mock Leaflet can prove or
-  // disprove this either way, since it stubs the whole bounds/zoom
-  // calculation rather than running Leaflet's real math — and this sandbox
-  // has no path to the real library or a real browser to reproduce it
-  // directly (every CDN, and even the plain npm/pip package registries, are
-  // blocked by its egress policy). So: fitBounds is now wrapped. If it throws
-  // again, instead of losing the whole map, fall back to manually centering
-  // and zooming from the raw lat/lng values ourselves — a looser frame than a
-  // perfectly tight fitBounds, but a working map beats an error message.
-  try{
-    map.fitBounds(L.latLngBounds(latlngs), {padding:[18,18]});
-  }catch(boundsErr){
-    console.error('fitBounds failed, falling back to a manual center/zoom:', boundsErr);
-    let minLat=Infinity,maxLat=-Infinity,minLon=Infinity,maxLon=-Infinity,sumLat=0,sumLon=0;
-    latlngs.forEach(([lat,lon])=>{
-      sumLat+=lat; sumLon+=lon;
-      if(lat<minLat)minLat=lat; if(lat>maxLat)maxLat=lat;
-      if(lon<minLon)minLon=lon; if(lon>maxLon)maxLon=lon;
-    });
-    const centerLat=sumLat/latlngs.length, centerLon=sumLon/latlngs.length;
-    const spanDeg=Math.max(maxLat-minLat, maxLon-minLon, 0.0008);
-    // Rough degree-span -> zoom mapping (each zoom level roughly halves the
-    // visible span); clamped to a sane range rather than trusting the formula
-    // at the extremes.
-    const zoom=Math.max(3, Math.min(17, Math.round(14 - Math.log2(spanDeg/0.01))));
-    map.setView([centerLat, centerLon], zoom);
-  }
 
   // The map side of the sync: a hover dot driven by the SPLITS chart (see
   // SPLITS_SYNC_TARGETS doc comment), positioned at the route point nearest

@@ -29,82 +29,116 @@ CARTO_API_KEY = os.environ.get("CARTO_API_KEY", "")  # optional, see setup guide
 
 RACE_DATE = date(2026, 11, 8)
 RACE_NAME = "Monterey Bay Half Marathon"
-GOAL_TIME_SEC = 2 * 3600 + 14 * 60        # sub-2:14 PR goal
-GOAL_PACE_MIN_MI = 10 + 5 / 60             # 10:05/mi — the "(goal pace)" workouts converge on this
-PRIOR_PR_SEC = 2 * 3600 + 18 * 60 + 46     # 2:18:46 — prior PR, for reference only
+# v15 — revised Sep 29, 2026. The original sub-2:14 goal assumed a training
+# block that didn't fully happen (see GOAL_REASSESSMENT below): roughly four
+# weeks of easy-only running with no tempo/interval structure actually
+# executed, surfaced by a Sep 29 tempo diagnostic that broke down after
+# 1.25mi continuous. Garmin's own race predictor (2:28:45 as of Sep 29) and
+# VO2 max trend (43-44, genuinely up from 41-42) both point to a real but
+# more modest fitness gain. GOAL_TIME_SEC is kept as the midpoint of the
+# revised range for any single-number use; the low/high pair is what's
+# actually shown on the dashboard.
+GOAL_TIME_LOW_SEC = 2 * 3600 + 25 * 60     # 2:25:00 — fast end of revised goal
+GOAL_TIME_HIGH_SEC = 2 * 3600 + 30 * 60    # 2:30:00 — slow end of revised goal
+GOAL_TIME_SEC = (GOAL_TIME_LOW_SEC + GOAL_TIME_HIGH_SEC) // 2
+GOAL_PACE_LOW_MIN_MI = 11 + 4 / 60         # 11:04/mi — pace at the fast end
+GOAL_PACE_HIGH_MIN_MI = 11 + 27 / 60       # 11:27/mi — pace at the slow end
+GOAL_PACE_MIN_MI = (GOAL_PACE_LOW_MIN_MI + GOAL_PACE_HIGH_MIN_MI) / 2
+PRIOR_PR_SEC = 2 * 3600 + 18 * 60 + 46     # 2:18:46 — prior PR, unchanged by this revision
 
 MI_PER_M = 1 / 1609.344
 FT_PER_M = 3.28084
 
 # =====================================================================
-# Training plan — encoded from the 3-day/week Monterey Bay Half plan
-# (intervals Mon / tempo Wed / long run Sat; strength+cross-training on the
-# other days aren't tracked here since Garmin only gets pulled for "running"
-# activities — see the setup guide for why that's a deliberate scope cut).
-#
-# targetMi per running day is a close ESTIMATE built from the plan's written
-# workout structure (warmup + main set + between-rep recovery jog, converted
-# to miles and rounded to the nearest 0.25mi) — not a value Garmin or the plan
-# states directly as a single number, except for the long run, which the plan
-# always gives as a plain mileage figure. Treat targetMi as a target band, not
-# a number your actual GPS distance needs to match exactly — real runs never
-# match a prescribed workout down to the hundredth of a mile anyway.
+# Goal reassessment — the reasoning behind the Sep 29 goal revision, shown
+# verbatim-ish on the dashboard as its own panel so the "why" travels with
+# the plan instead of living only in a commit message. Kept as a simple list
+# of {label, text} findings, same shape the plan itself used.
 # =====================================================================
-PLAN_START = date(2026, 8, 10)  # Monday of Week 1
+GOAL_REASSESSMENT = {
+    "updated": "2026-09-29",
+    "priorGoal": "sub-2:14:00",
+    "revisedGoalLabel": "2:25:00–2:30:00",
+    "revisedPaceLabel": "11:04–11:27/mi",
+    "findings": [
+        {"label": "Race predictor", "text": "Garmin's current estimate (Sep 29) is 2:28:45 for the half marathon, based on VO2 max. This is a ceiling estimate from raw aerobic capacity — it doesn't account for race-specific threshold conditioning, which has been largely absent."},
+        {"label": "VO2 max trend", "text": "Sitting at 43–44, genuinely up from the 41–42 plateau earlier in the cycle — real aerobic progress has happened."},
+        {"label": "Training gap", "text": "Every logged run for roughly four weeks prior to Sep 29 was easy-pace only (11:55–13:22/mi) — no tempo or interval structure actually executed, despite being in the calendar. The aerobic engine improved; the specific skill of sustaining faster paces did not get trained."},
+        {"label": "Sep 29 diagnostic", "text": "First real tempo effort in weeks: 1.25mi continuous @ 10:54/mi, HR 158 — clean, controlled, right on target. Then broke down into a run/walk pattern for the remainder (fatigue, not pain). Established current sustainable continuous tempo: ~1.25mi @ 10:50–11:00/mi."},
+        {"label": "Revised goal", "text": "Sub-2:14 is not realistic with 40 days left and this training gap. 2:25–2:30 matches the predictor, respects the real tempo-duration data from Sep 29, and leaves room for a strong final few weeks without overreaching."},
+        {"label": "Injury status", "text": "The Aug calf/Achilles-adjacent strain is resolved — no pain in the Sep 29 session, fatigue only. The next few tempo/interval sessions are still a gradual rebuild, not a return to full intensity."},
+    ],
+}
+
+# =====================================================================
+# Training plan — the real, 7-day/week Monterey Bay Half plan, rebuilt
+# Sep 29, 2026 off the reassessment above. Unlike the old 3-day plan, every
+# day of the week has a prescribed session, but Garmin only gets pulled for
+# running activities, so each session carries a "trackable" flag: a running
+# session (Intervals/Tempo/Long Run/Easy/Race) can be matched against a real
+# Garmin run; a non-running session (Rest/Cross Training/Strength) can't and
+# is just displayed as planned.
+#
+# targetMi on a trackable day is a close ESTIMATE built from the session's
+# written structure (warmup + main set + between-rep recovery jog, converted
+# to miles and rounded to the nearest 0.25mi) — not a value Garmin or the
+# plan states directly, except where the plan already gives a plain mileage
+# figure (every long run, and race day). Treat targetMi as a target band,
+# not a number a real GPS distance needs to match exactly.
+# =====================================================================
+PLAN_START = date(2026, 9, 28)  # Monday of Week 1 (the week of the Sep 29 reassessment)
+
+TRACKABLE_TYPES = {"Intervals", "Tempo", "Long Run", "Easy", "Race"}
 
 TRAINING_PLAN = [
-    {"phase": "Build Tolerance", "longRunTargetMi": 6.0, "weeklyTargetMi": 14.25, "sessions": {
-        "mon": {"type": "Intervals", "label": "5×400m @ 8:40/mi", "targetMi": 4.25},
-        "wed": {"type": "Tempo", "label": "2mi @ 10:50/mi", "targetMi": 4.0},
-        "sat": {"type": "Long Run", "label": "6mi easy", "targetMi": 6.0}}},
-    {"phase": "Build Tolerance", "longRunTargetMi": 6.5, "weeklyTargetMi": 11.0, "sessions": {
-        "mon": {"type": "Rest", "label": "Optional 2-3mi shakeout (travel)", "targetMi": 0},
-        "wed": {"type": "Tempo", "label": "2.5mi @ 10:40/mi", "targetMi": 4.5},
-        "sat": {"type": "Long Run", "label": "6.5mi easy", "targetMi": 6.5}}},
-    {"phase": "Build Tolerance", "longRunTargetMi": 9.0, "weeklyTargetMi": 19.5, "sessions": {
-        "mon": {"type": "Intervals", "label": "5×800m @ 9:04/mi", "targetMi": 5.5},
-        "wed": {"type": "Tempo", "label": "3mi @ 10:35/mi", "targetMi": 5.0},
-        "sat": {"type": "Long Run", "label": "9mi, last 1mi @ 10:45/mi", "targetMi": 9.0}}},
-    {"phase": "Build Tolerance", "longRunTargetMi": 10.0, "weeklyTargetMi": 21.0, "sessions": {
-        "mon": {"type": "Intervals", "label": "5×800m @ 8:54/mi", "targetMi": 5.5},
-        "wed": {"type": "Tempo", "label": "3.5mi @ 10:30/mi", "targetMi": 5.5},
-        "sat": {"type": "Long Run", "label": "10mi, last 2mi @ 10:45/mi", "targetMi": 10.0}}},
-    {"phase": "Recovery", "longRunTargetMi": 7.5, "weeklyTargetMi": 14.5, "sessions": {
-        "mon": {"type": "Intervals", "label": "4×400m @ 8:40/mi (reduced)", "targetMi": 3.0},
-        "wed": {"type": "Tempo", "label": "2mi @ 10:40/mi (reduced)", "targetMi": 4.0},
-        "sat": {"type": "Long Run", "label": "7.5mi easy, down week", "targetMi": 7.5}}},
-    {"phase": "Sharpen", "longRunTargetMi": 11.0, "weeklyTargetMi": 22.5, "sessions": {
-        "mon": {"type": "Intervals", "label": "4×1000m @ 8:48/mi", "targetMi": 5.5},
-        "wed": {"type": "Tempo", "label": "4mi @ 10:20/mi", "targetMi": 6.0},
-        "sat": {"type": "Long Run", "label": "11mi, last 2mi @ 10:35/mi", "targetMi": 11.0}}},
-    {"phase": "Sharpen", "longRunTargetMi": 12.0, "weeklyTargetMi": 25.5, "sessions": {
-        "mon": {"type": "Intervals", "label": "4×1mi @ 9:40/mi", "targetMi": 7.0},
-        "wed": {"type": "Tempo", "label": "4.5mi @ 10:10/mi", "targetMi": 6.5},
-        "sat": {"type": "Long Run", "label": "12mi, last 3mi @ 10:25/mi", "targetMi": 12.0}}},
-    {"phase": "Sharpen", "longRunTargetMi": 13.0, "weeklyTargetMi": 27.5, "sessions": {
-        "mon": {"type": "Intervals", "label": "3×1.5mi @ 9:45/mi", "targetMi": 7.5},
-        "wed": {"type": "Tempo", "label": "5mi @ 10:05/mi", "targetMi": 7.0},
-        "sat": {"type": "Long Run", "label": "13mi, last 3mi @ 10:20/mi", "targetMi": 13.0}}},
-    {"phase": "Peak", "longRunTargetMi": 14.0, "weeklyTargetMi": 27.75, "sessions": {
-        "mon": {"type": "Intervals", "label": "2×2mi @ 10:00/mi (goal pace)", "targetMi": 6.75},
-        "wed": {"type": "Tempo", "label": "5mi @ 10:05/mi (goal pace)", "targetMi": 7.0},
-        "sat": {"type": "Long Run", "label": "14mi, last 4mi @ goal pace — key checkpoint", "targetMi": 14.0}}},
-    {"phase": "Taper", "longRunTargetMi": 10.0, "weeklyTargetMi": 21.75, "sessions": {
-        "mon": {"type": "Intervals", "label": "3×1mi @ 9:45/mi", "targetMi": 5.75},
-        "wed": {"type": "Tempo", "label": "4mi @ 10:10/mi", "targetMi": 6.0},
-        "sat": {"type": "Long Run", "label": "10mi, last 2mi @ goal pace", "targetMi": 10.0}}},
-    {"phase": "Taper", "longRunTargetMi": 7.0, "weeklyTargetMi": 15.0, "sessions": {
-        "mon": {"type": "Intervals", "label": "4×400m @ 8:00/mi fast (sharpeners)", "targetMi": 3.0},
-        "wed": {"type": "Tempo", "label": "3mi @ 10:10/mi (short)", "targetMi": 5.0},
-        "sat": {"type": "Long Run", "label": "7mi easy (reduced)", "targetMi": 7.0}}},
-    {"phase": "Taper", "longRunTargetMi": 5.0, "weeklyTargetMi": 11.75, "sessions": {
-        "mon": {"type": "Easy", "label": "4×300m strides (sharpeners)", "targetMi": 2.75},
-        "wed": {"type": "Tempo", "label": "2mi @ 10:15/mi (short)", "targetMi": 4.0},
-        "sat": {"type": "Easy", "label": "5mi easy — shakeout", "targetMi": 5.0}}},
-    {"phase": "Race Week", "longRunTargetMi": 1.5, "weeklyTargetMi": 6.75, "sessions": {
-        "mon": {"type": "Easy", "label": "3mi easy", "targetMi": 3.0},
-        "wed": {"type": "Easy", "label": "2mi easy + strides", "targetMi": 2.25},
-        "sat": {"type": "Easy", "label": "1-2mi shakeout + strides", "targetMi": 1.5}}},
+    {"phase": "Reintroduction", "longRunTargetMi": 8.0, "weeklyTargetMi": 11.25, "sessions": {
+        "mon": {"type": "Rest", "title": "(Past) Skipped", "detail": "Intervals not run this week — shifted to accommodate schedule.", "targetMi": 0},
+        "tue": {"type": "Tempo", "title": "Tempo diagnostic (done)", "detail": "1mi WU + 1.25mi @ 10:54/mi (clean) + run/walk breakdown. Established current sustainable tempo distance.", "targetMi": 3.25},
+        "wed": {"type": "Rest", "title": "Rest", "detail": "Legs recovering from Tuesday's effort — no strength or hard run.", "targetMi": 0},
+        "thu": {"type": "Cross Training", "title": "Cross-training", "detail": "25–30min easy bike/pool/elliptical.", "targetMi": 0},
+        "fri": {"type": "Strength — Light", "title": "Strength · Light", "detail": "Spanish squats 4×30-40s, decline squats 2×10/leg, glute bridges 2×12/leg, band walks 2×15.", "targetMi": 0},
+        "sat": {"type": "Long Run", "title": "Long run", "detail": "8mi easy, no pace push — continuing the reintroduction.", "targetMi": 8.0},
+        "sun": {"type": "Cross Training", "title": "Cross-training", "detail": "25min very easy.", "targetMi": 0}}},
+    {"phase": "Rebuild", "longRunTargetMi": 9.0, "weeklyTargetMi": 16.25, "sessions": {
+        "mon": {"type": "Intervals", "title": "Intervals (conservative)", "detail": "1mi WU @ 12:00-12:30/mi + 4×400m @ 2:15 (9:00/mi), 400m jog + 1mi CD @ 12:00-12:30/mi.", "targetMi": 3.75},
+        "tue": {"type": "Strength — Heavy", "title": "Strength · Heavy", "detail": "Trap bar/leg press 3×6-8, Bulgarian splits 3×8/leg, Nordics 3×6, calf raises 2×15.", "targetMi": 0},
+        "wed": {"type": "Tempo", "title": "Tempo (building)", "detail": "1mi WU @ 12:00-12:30/mi + 1.5mi continuous @ 10:50/mi + 1mi CD @ 12:00-12:30/mi — up from Sep 29's proven 1.25mi.", "targetMi": 3.5},
+        "thu": {"type": "Cross Training", "title": "Cross-training", "detail": "30min easy bike/pool/elliptical.", "targetMi": 0},
+        "fri": {"type": "Strength — Light", "title": "Strength · Light", "detail": "Spanish squats 4×30-40s, decline squats 2×10/leg, glute bridges 2×12/leg, band walks 2×15.", "targetMi": 0},
+        "sat": {"type": "Long Run", "title": "Long run", "detail": "9mi, last 1mi @ 11:30/mi — gentle pace touch, not a push.", "targetMi": 9.0},
+        "sun": {"type": "Cross Training", "title": "Cross-training", "detail": "25min very easy.", "targetMi": 0}}},
+    {"phase": "Rebuild", "longRunTargetMi": 11.0, "weeklyTargetMi": 19.0, "sessions": {
+        "mon": {"type": "Intervals", "title": "Intervals", "detail": "1mi WU @ 12:00-12:30/mi + 5×400m @ 2:10 (8:40/mi), 400m jog + 1mi CD @ 12:00-12:30/mi.", "targetMi": 4.25},
+        "tue": {"type": "Strength — Heavy", "title": "Strength · Heavy", "detail": "Trap bar/leg press 3×6-8, Bulgarian splits 3×8/leg, Nordics 3×6, calf raises 2×15.", "targetMi": 0},
+        "wed": {"type": "Tempo", "title": "Tempo (building)", "detail": "1mi WU @ 12:00-12:30/mi + 1.75mi continuous @ 10:45/mi + 1mi CD @ 12:00-12:30/mi.", "targetMi": 3.75},
+        "thu": {"type": "Cross Training", "title": "Cross-training", "detail": "30min easy bike/pool/elliptical.", "targetMi": 0},
+        "fri": {"type": "Strength — Light", "title": "Strength · Light", "detail": "Spanish squats 4×30-40s, decline squats 2×10/leg, glute bridges 2×12/leg, band walks 2×15.", "targetMi": 0},
+        "sat": {"type": "Long Run", "title": "Peak long run", "detail": "11mi, last 2mi @ 11:00-11:15/mi (goal-pace-adjacent) — key checkpoint.", "targetMi": 11.0},
+        "sun": {"type": "Cross Training", "title": "Cross-training", "detail": "25min very easy.", "targetMi": 0}}},
+    {"phase": "Taper begins", "longRunTargetMi": 8.0, "weeklyTargetMi": 15.75, "sessions": {
+        "mon": {"type": "Intervals", "title": "Intervals (reduced)", "detail": "1mi WU @ 12:00-12:30/mi + 4×400m @ 2:10 (8:40/mi) + 1mi CD @ 12:00-12:30/mi.", "targetMi": 3.75},
+        "tue": {"type": "Strength — Heavy", "title": "Strength · Moderate", "detail": "Trap bar/leg press 3×6, Bulgarian splits 2×8/leg, calf raises 2×12 — trimming volume.", "targetMi": 0},
+        "wed": {"type": "Tempo", "title": "Tempo (goal pace)", "detail": "1mi WU @ 12:00-12:30/mi + 2mi continuous @ 10:40/mi + 1mi CD @ 12:00-12:30/mi.", "targetMi": 4.0},
+        "thu": {"type": "Cross Training", "title": "Cross-training", "detail": "25min easy.", "targetMi": 0},
+        "fri": {"type": "Strength — Light", "title": "Strength · Light", "detail": "Spanish squats 3×30s, decline squats 2×8/leg, glute bridges 2×10/leg.", "targetMi": 0},
+        "sat": {"type": "Long Run", "title": "Long run", "detail": "8mi easy, last 1mi @ goal pace.", "targetMi": 8.0},
+        "sun": {"type": "Cross Training", "title": "Cross-training", "detail": "20min very easy.", "targetMi": 0}}},
+    {"phase": "Deep taper", "longRunTargetMi": 5.0, "weeklyTargetMi": 11.25, "sessions": {
+        "mon": {"type": "Easy", "title": "Sharpeners", "detail": "1mi WU + 4×300m fast + 1mi CD — very light.", "targetMi": 2.75},
+        "tue": {"type": "Rest", "title": "Strength · Mobility only", "detail": "Light movement patterns — no loaded lifting.", "targetMi": 0},
+        "wed": {"type": "Tempo", "title": "Short tempo", "detail": "1mi WU + 1.5mi @ 10:45/mi + 1mi CD.", "targetMi": 3.5},
+        "thu": {"type": "Rest", "title": "Rest", "detail": "Full rest, or 20min very easy.", "targetMi": 0},
+        "fri": {"type": "Rest", "title": "Rest", "detail": "Full rest.", "targetMi": 0},
+        "sat": {"type": "Easy", "title": "Shakeout", "detail": "5mi easy.", "targetMi": 5.0},
+        "sun": {"type": "Rest", "title": "Rest", "detail": "Full rest.", "targetMi": 0}}},
+    {"phase": "Race Week", "longRunTargetMi": 3.0, "weeklyTargetMi": 6.75, "sessions": {
+        "mon": {"type": "Easy", "title": "Easy run", "detail": "3mi easy @ 12:00/mi.", "targetMi": 3.0},
+        "tue": {"type": "Rest", "title": "Rest", "detail": "Full rest.", "targetMi": 0},
+        "wed": {"type": "Easy", "title": "Easy + strides", "detail": "2mi easy + 4×20s strides.", "targetMi": 2.25},
+        "thu": {"type": "Rest", "title": "Rest or shakeout", "detail": "20min very easy, or full rest.", "targetMi": 0},
+        "fri": {"type": "Rest", "title": "Rest", "detail": "Full rest.", "targetMi": 0},
+        "sat": {"type": "Easy", "title": "Shakeout + strides", "detail": "1-2mi very easy + 4×20s strides. Lay out race kit.", "targetMi": 1.5},
+        "sun": {"type": "Race", "title": "MONTEREY BAY HALF", "detail": "13.1mi · Goal: 2:25–2:30 (11:04–11:27/mi avg).", "targetMi": 13.1}}},
 ]
 
 # =====================================================================
@@ -285,9 +319,20 @@ def build_load_mix(runs_asc, today, window_days=28):
 
 # =====================================================================
 # Plan vs. actual — compares TRAINING_PLAN (above) against what Garmin
-# actually recorded, week by week. Scoped to running days only (Mon/Wed/Sat
-# in this plan) since that's all the script fetches from Garmin.
+# actually recorded, week by week. Every day of the week gets a session (see
+# TRAINING_PLAN above), but only "trackable" types (TRACKABLE_TYPES) can be
+# matched against a real Garmin run — a Rest/Cross Training/Strength day is
+# shown as planned with no attempt to match it to anything.
+#
+# Race day is trackable (so a finished race shows up like any other run) but
+# is deliberately excluded from the week's actualMi/adherence math: folding
+# 13.1 race miles into a taper week's "adherence" would make a deliberately
+# light week look like a blowout, which is the opposite of useful. It's
+# still reported per-day (and the week carries its own raceDayMi/
+# raceDayActualMi fields) — just not in the weekly mileage total.
 # =====================================================================
+DAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
 def build_plan_comparison(runs_asc, today):
     out = []
     for i, wk in enumerate(TRAINING_PLAN):
@@ -295,29 +340,52 @@ def build_plan_comparison(runs_asc, today):
         week_end = week_start + timedelta(days=6)
         is_future = week_start > today
         week_runs = [r for r in runs_asc if week_start <= r["date"] <= week_end]
-        actual_mi = round(sum(r["distMi"] for r in week_runs), 1) if (week_runs or not is_future) else None
-        actual_long = round(max((r["distMi"] for r in week_runs), default=0.0), 1) if (week_runs or not is_future) else None
 
         sessions_out = {}
-        for day_key, offset in (("mon", 0), ("wed", 2), ("sat", 5)):
+        race_match_id = None
+        race_day_mi = None
+        race_day_actual_mi = None
+        for offset, day_key in enumerate(DAY_KEYS):
             planned = wk["sessions"].get(day_key)
             if not planned:
                 continue
             target_date = week_start + timedelta(days=offset)
+            trackable = planned["type"] in TRACKABLE_TYPES
+            day_is_future = target_date > today
             match = None
-            if not is_future:
+            if trackable and not day_is_future:
                 # nearest actual run within a day of the planned date — real
                 # schedules slip by a day without it meaning the session was skipped
                 candidates = [r for r in runs_asc if abs((r["date"] - target_date).days) <= 1]
                 if candidates:
                     match = min(candidates, key=lambda r: abs((r["date"] - target_date).days))
+            if not trackable:
+                day_status = "not-tracked"
+            elif day_is_future:
+                day_status = "upcoming"
+            elif match:
+                day_status = "done"
+            else:
+                day_status = "missed"
             sessions_out[day_key] = {
-                "type": planned["type"], "label": planned["label"], "targetMi": planned["targetMi"],
-                "date": target_date.isoformat(),
+                "type": planned["type"], "title": planned["title"], "detail": planned["detail"],
+                "targetMi": planned["targetMi"], "date": target_date.isoformat(),
+                "trackable": trackable, "dayStatus": day_status,
                 "actualMi": round(match["distMi"], 2) if match else None,
                 "actualPace": match["paceMinMi"] if match else None,
                 "matched": bool(match),
             }
+            if planned["type"] == "Race":
+                race_day_mi = planned["targetMi"]
+                if match:
+                    race_match_id = match.get("id")
+                    race_day_actual_mi = round(match["distMi"], 2)
+
+        # Exclude the matched race-day run (if any) from the week's own mileage
+        # total — see module docstring above.
+        mileage_runs = [r for r in week_runs if race_match_id is None or r.get("id") != race_match_id]
+        actual_mi = round(sum(r["distMi"] for r in mileage_runs), 1) if (mileage_runs or not is_future) else None
+        actual_long = round(max((r["distMi"] for r in mileage_runs), default=0.0), 1) if (mileage_runs or not is_future) else None
 
         weekly_target = wk["weeklyTargetMi"]
         adherence_pct = round(actual_mi / weekly_target * 100) if (actual_mi is not None and weekly_target) else None
@@ -333,9 +401,10 @@ def build_plan_comparison(runs_asc, today):
             status = "well-behind"
 
         out.append({
-            "weekStart": week_start.isoformat(), "weekLabel": week_start.strftime("%b %-d"),
+            "weekStart": week_start.isoformat(), "weekEnd": week_end.isoformat(), "weekLabel": week_start.strftime("%b %-d"),
             "phase": wk["phase"], "plannedMi": weekly_target, "actualMi": actual_mi,
             "adherencePct": adherence_pct, "plannedLongRun": wk["longRunTargetMi"], "actualLongRun": actual_long,
+            "raceDayMi": race_day_mi, "raceDayActualMi": race_day_actual_mi,
             "status": status, "sessions": sessions_out,
         })
     return out
@@ -1372,7 +1441,13 @@ def main():
             "syncRangeEnd": today.isoformat(),
             "detailRunCount": DETAIL_RUN_COUNT,
             "cartoApiKey": CARTO_API_KEY,
+            "goalLabel": GOAL_REASSESSMENT["revisedGoalLabel"],
+            "goalPaceLabel": GOAL_REASSESSMENT["revisedPaceLabel"],
+            "priorGoalLabel": GOAL_REASSESSMENT["priorGoal"],
+            "priorPrSec": PRIOR_PR_SEC,
+            "planStart": PLAN_START.isoformat(),
         },
+        "goalReassessment": GOAL_REASSESSMENT,
         "recommendation": recommendation,
         "runs": [{k: v for k, v in r.items() if k not in ("distance_m", "duration_s")} for r in runs_desc],
         "weekly": weeks,
@@ -1433,7 +1508,10 @@ HTML_SHELL = r"""<!DOCTYPE html>
           <h1 id="hero-title">Build → Race</h1>
         </div>
       </div>
-      <div class="sync-badge"><span class="sync-dot"></span><span id="sync-text">Synced from Garmin —</span></div>
+      <div class="header-actions">
+        <div class="sync-badge"><span class="sync-dot"></span><span id="sync-text">Synced from Garmin —</span></div>
+        <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle light/dark theme" title="Toggle light/dark theme">&#9789;</button>
+      </div>
     </div>
     <div class="countdown-strip" id="countdown-strip"></div>
   </div>
@@ -1446,7 +1524,23 @@ HTML_SHELL = r"""<!DOCTYPE html>
     <div class="panel rec-panel" id="rec-panel"></div>
   </section>
 
-  <section>
+  <section id="goal-reassessment-section" style="display:none;">
+    <div class="section-head">
+      <div class="section-title">Goal Reassessment</div>
+      <div class="section-note" id="goal-updated-note"></div>
+    </div>
+    <div class="panel goal-panel" id="goal-panel"></div>
+  </section>
+
+  <section id="nav-today">
+    <div class="section-head">
+      <div class="section-title">This Week's Plan</div>
+      <div class="section-note">Every day of the current training week, matched against what Garmin actually recorded.</div>
+    </div>
+    <div class="panel" id="this-week-panel"></div>
+  </section>
+
+  <section id="nav-training">
     <div class="section-head">
       <div class="section-title"><span class="section-index">01</span> Weekly Volume &amp; Training Load</div>
       <div class="section-note">Mileage by week against your long run distance and weekly run count.</div>
@@ -1457,6 +1551,7 @@ HTML_SHELL = r"""<!DOCTYPE html>
         <div class="legend-item"><span class="legend-swatch" style="background:var(--amber)"></span>Weekly miles</div>
         <div class="legend-item"><span class="legend-swatch" style="background:var(--blue)"></span>Long run distance</div>
         <div class="legend-item"><span class="legend-swatch" style="background:var(--teal); border-radius:50%;"></span>Runs per week</div>
+        <div class="legend-item">★ Peak week, all-time</div>
       </div>
     </div>
   </section>
@@ -1483,8 +1578,11 @@ HTML_SHELL = r"""<!DOCTYPE html>
         <div class="legend-item"><span class="legend-swatch" style="background:var(--text-dim)"></span>Planned miles</div>
         <div class="legend-item"><span class="legend-swatch" style="background:var(--amber)"></span>Actual miles</div>
       </div>
+      <div class="phase-legend-row" id="phase-legend"></div>
     </div>
-    <div class="panel" style="margin-top:16px;">
+    <div class="panel plan-table-wrap" style="margin-top:16px;">
+      <details class="plan-expand" open>
+      <summary>Full plan, all weeks</summary>
       <div class="table-scroll">
         <table id="plan-table">
           <thead>
@@ -1495,6 +1593,7 @@ HTML_SHELL = r"""<!DOCTYPE html>
           <tbody id="plan-table-body"></tbody>
         </table>
       </div>
+      </details>
     </div>
   </section>
 
@@ -1506,14 +1605,14 @@ HTML_SHELL = r"""<!DOCTYPE html>
     <div id="insights" style="display:flex; flex-direction:column; gap:10px;"></div>
   </section>
 
-  <section>
+  <section id="nav-recovery">
     <div class="section-head">
       <div class="section-title"><span class="section-index">05</span> Recovery &amp; Readiness</div>
       <div class="section-note">Today's readiness, HRV trend, and how training effort has split across intensity bands.</div>
     </div>
     <div class="panel-triple">
       <div class="panel">
-        <div class="stat-label">Training Readiness — Today</div>
+        <div class="stat-label"><span class="label-with-tip">Training Readiness — Today<button type="button" class="info-tip-btn" data-info-key="readiness">i</button></span></div>
         <div class="readiness-ring-row">
           <svg class="readiness-ring" viewBox="0 0 110 110" width="104" height="104">
             <circle cx="55" cy="55" r="46" fill="none" class="ring-track" stroke-width="10"/>
@@ -1530,15 +1629,16 @@ HTML_SHELL = r"""<!DOCTYPE html>
           <div style="display:flex; align-items:baseline; gap:8px; margin-top:8px; flex-wrap:wrap;">
             <span class="badge good" id="training-status-badge">—</span>
             <span class="dial-label" id="training-acwr"></span>
+            <button type="button" class="info-tip-btn" data-info-key="acwr">i</button>
           </div>
         </div>
       </div>
       <div class="panel">
-        <div class="stat-label">HRV Trend</div>
+        <div class="stat-label"><span class="label-with-tip">HRV Trend<button type="button" class="info-tip-btn" data-info-key="hrv">i</button></span></div>
         <div class="chart-box" style="height:190px; margin-top:10px;"><div id="chart-hrv" class="svg-chart"></div></div>
       </div>
       <div class="panel">
-        <div class="stat-label">Effort Mix — Last 4 Weeks</div>
+        <div class="stat-label"><span class="label-with-tip">Effort Mix — Last 4 Weeks<button type="button" class="info-tip-btn" data-info-key="effortmix">i</button></span></div>
         <div class="balance-bars" id="balance-bars"></div>
       </div>
     </div>
@@ -1560,7 +1660,7 @@ HTML_SHELL = r"""<!DOCTYPE html>
       </div>
     </div>
     <div class="panel" style="margin-top:16px;">
-      <div class="stat-label">Aerobic Efficiency — Easy &amp; Long Runs</div>
+      <div class="stat-label"><span class="label-with-tip">Aerobic Efficiency — Easy &amp; Long Runs<button type="button" class="info-tip-btn" data-info-key="efficiency">i</button></span></div>
       <div class="chart-box" style="height:190px; margin-top:10px;"><div id="chart-efficiency" class="svg-chart"></div></div>
       <div class="chart-caption">Speed per heartbeat, rising = more efficient. A better read on aerobic fitness than pace alone, since it's not thrown off by hot days or hills.</div>
     </div>
@@ -1579,7 +1679,7 @@ HTML_SHELL = r"""<!DOCTYPE html>
     </div>
   </section>
 
-  <section>
+  <section id="nav-runs">
     <div class="section-head">
       <div class="section-title"><span class="section-index">08</span> Full Run Log</div>
       <div class="section-note" id="table-note">Click a column to sort · click a row for splits, cadence, HR and route.</div>
@@ -1616,9 +1716,20 @@ HTML_SHELL = r"""<!DOCTYPE html>
     <div>Source: Garmin Connect</div>
   </footer>
 </div>
+<nav class="mobile-tabbar" id="mobile-tabbar">
+  <button type="button" data-target="nav-today">Today</button>
+  <button type="button" data-target="nav-training">Training</button>
+  <button type="button" data-target="nav-recovery">Recovery</button>
+  <button type="button" data-target="nav-runs">Runs</button>
+</nav>
 <div id="run-modal" class="modal-overlay" style="display:none;">
   <div class="modal-panel">
     <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+    <div class="modal-nav-row">
+      <button type="button" class="modal-nav-btn" id="modal-prev">&larr; Prev</button>
+      <button type="button" class="modal-nav-btn" id="modal-next">Next &rarr;</button>
+    </div>
+    <div class="modal-ministrip" id="modal-ministrip"></div>
     <div id="modal-body"></div>
   </div>
 </div>
@@ -1654,6 +1765,25 @@ CSS = r"""
   --font-body: 'IBM Plex Sans', -apple-system, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
 }
+/* v15 — light theme. Same token names, a parallel light palette, so every
+   component below (all written against var(--bg) etc., never a literal hex)
+   repaints automatically. Toggled by data-theme="light" on <html>, set by
+   the theme button in the header and remembered per-browser. */
+[data-theme="light"]{
+  --bg: #F3F5F8; --bg-panel: #FFFFFF; --bg-raised: #EAEFF4; --bg-inset: #E3E9EF;
+  --border: rgba(14,20,28,0.12); --border-soft: rgba(14,20,28,0.07);
+  --text: #121922; --text-muted: #51606F; --text-dim: #8996A3;
+  --amber: #0091B8; --amber-dim: #D8EFF6;
+  --teal: #1C9A62; --teal-dim: #DCF4E8;
+  --clay: #D43B45; --clay-dim: #FBE1E2;
+  --blue: #1E9E80; --blue-dim: #DCF3EC;
+  --warn: #B3780E; --warn-dim: #FBEBD2;
+}
+[data-theme="light"] ::selection{ background:var(--amber); color:#FFFFFF; }
+[data-theme="light"] .route-map.osm-fallback .leaflet-tile-pane{ filter:none; }
+[data-theme="light"] .console-header{ background: radial-gradient(ellipse 900px 300px at 15% -20%, rgba(0,145,184,0.08), transparent), var(--bg); }
+[data-theme="light"] #chart-tooltip{ box-shadow:0 8px 20px rgba(20,30,40,0.14); }
+[data-theme="light"] .modal-overlay{ background:rgba(20,28,36,0.45); }
 *{ box-sizing:border-box; margin:0; padding:0; }
 body{ background:var(--bg); color:var(--text); font-family:var(--font-body); line-height:1.5; -webkit-font-smoothing:antialiased; padding:0 0 64px; }
 ::selection{ background:var(--amber); color:#0E141C; }
@@ -1845,6 +1975,86 @@ footer .update-note b{ color:var(--text-muted); }
 #chart-zoom-toolbar-slot .chart-toolbar{ margin-bottom:0; }
 #chart-zoom-box{ margin-top:8px; height:min(68vh,560px); border:1px solid var(--border-soft); border-radius:4px; background:var(--bg-inset); }
 .chart-zoom-hint{ margin-top:8px; font-size:11px; color:var(--text-dim); text-align:center; }
+
+/* ---- v15: theme toggle ---- */
+.theme-toggle{ font-family:var(--font-mono); font-size:16px; width:36px; height:36px; display:flex; align-items:center; justify-content:center; background:var(--bg-panel); border:1px solid var(--border); border-radius:6px; color:var(--text-muted); cursor:pointer; flex-shrink:0; transition:color .15s, border-color .15s; }
+.theme-toggle:hover{ color:var(--text); border-color:var(--text-dim); }
+.header-actions{ display:flex; gap:10px; align-items:center; }
+
+/* ---- v15: info-tap glossary ---- */
+.info-tip-btn{ display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:50%; background:var(--bg-inset); color:var(--text-dim); font-family:var(--font-mono); font-size:10px; font-weight:600; border:1px solid var(--border); cursor:pointer; margin-left:5px; flex-shrink:0; line-height:1; }
+.info-tip-btn:hover, .info-tip-btn.open{ color:var(--amber); border-color:var(--amber); }
+.info-tip-pop{ position:absolute; z-index:60; max-width:240px; background:var(--bg-raised); border:1px solid var(--border); border-radius:6px; padding:10px 12px; font-size:12px; line-height:1.5; color:var(--text-muted); box-shadow:0 10px 24px rgba(0,0,0,0.3); display:none; }
+.info-tip-pop.show{ display:block; }
+.info-tip-pop b{ color:var(--text); }
+.label-with-tip{ display:inline-flex; align-items:center; position:relative; }
+
+/* ---- v15: This Week's Plan panel ---- */
+.week-recap{ display:flex; flex-wrap:wrap; gap:18px; align-items:baseline; margin-bottom:16px; font-size:12.5px; color:var(--text-muted); }
+.week-recap b{ color:var(--text); font-family:var(--font-mono); }
+.week-days{ display:grid; grid-template-columns:repeat(7,1fr); gap:8px; }
+@media (max-width:760px){ .week-days{ grid-template-columns:repeat(2,1fr); } }
+.week-day-card{ border:1px solid var(--border); border-radius:6px; padding:10px 10px 11px; background:var(--bg-raised); display:flex; flex-direction:column; gap:5px; min-height:112px; position:relative; }
+.week-day-card.is-today{ border-color:var(--amber); box-shadow:0 0 0 1px var(--amber) inset; }
+.week-day-card .wd-name{ font-family:var(--font-mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-dim); display:flex; justify-content:space-between; align-items:center; }
+.week-day-card .wd-today-chip{ font-family:var(--font-mono); font-size:8.5px; background:var(--amber); color:#fff; padding:1px 5px; border-radius:20px; letter-spacing:0.04em; }
+.week-day-card .wd-type{ display:inline-block; align-self:flex-start; font-family:var(--font-display); font-weight:700; font-size:9.5px; text-transform:uppercase; letter-spacing:0.02em; padding:2px 7px; border-radius:3px; color:#fff; }
+.week-day-card .wd-title{ font-size:11.5px; font-weight:600; line-height:1.25; }
+.week-day-card .wd-sub{ font-size:10.5px; color:var(--text-muted); line-height:1.3; margin-top:auto; }
+.week-day-card.status-done{ opacity:0.72; }
+.week-day-card .wd-status-icon{ position:absolute; top:8px; right:8px; font-size:11px; }
+.plan-table-wrap .section-note-inline{ font-size:12px; color:var(--text-dim); margin-bottom:10px; }
+details.plan-expand{ margin-top:14px; }
+details.plan-expand > summary{ cursor:pointer; font-family:var(--font-mono); font-size:12px; color:var(--text-muted); padding:6px 0; list-style:none; }
+details.plan-expand > summary::-webkit-details-marker{ display:none; }
+details.plan-expand > summary::before{ content:"\25B8  "; color:var(--amber); }
+details.plan-expand[open] > summary::before{ content:"\25BE  "; }
+.phase-chip{ display:inline-flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted); }
+.phase-chip .dot{ width:8px; height:8px; border-radius:2px; display:inline-block; }
+.phase-legend-row{ display:flex; flex-wrap:wrap; gap:14px; margin-top:10px; }
+
+/* ---- v15: goal reassessment panel ---- */
+.goal-panel .goal-head{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+.goal-range{ font-family:var(--font-mono); font-size:clamp(18px,4vw,22px); font-weight:600; color:var(--amber); }
+.goal-prior{ font-size:12px; color:var(--text-dim); text-decoration:line-through; }
+.goal-findings{ margin-top:14px; display:flex; flex-direction:column; gap:10px; }
+.goal-finding{ display:grid; grid-template-columns:120px 1fr; gap:14px; padding-top:10px; border-top:1px solid var(--border-soft); }
+.goal-finding:first-child{ border-top:none; padding-top:0; }
+.goal-finding .gf-label{ font-family:var(--font-mono); font-size:11px; color:var(--text-dim); padding-top:1px; }
+.goal-finding .gf-text{ font-size:12.5px; color:var(--text-muted); line-height:1.55; }
+@media (max-width:640px){ .goal-finding{ grid-template-columns:1fr; gap:3px; } }
+
+/* ---- v15: mobile quick-nav ---- */
+.mobile-tabbar{ display:none; }
+@media (max-width:760px){
+  .mobile-tabbar{ display:flex; position:fixed; left:0; right:0; bottom:0; z-index:500; background:var(--bg-panel); border-top:1px solid var(--border); padding:6px 4px calc(6px + env(safe-area-inset-bottom)); }
+  .mobile-tabbar button{ flex:1; background:none; border:none; color:var(--text-dim); font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.04em; padding:6px 2px; cursor:pointer; }
+  .mobile-tabbar button.active{ color:var(--amber); }
+  body{ padding-bottom:60px; }
+}
+
+/* ---- v15: run-detail modal upgrades ---- */
+.modal-nav-row{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.modal-nav-btn{ font-family:var(--font-mono); font-size:11px; background:var(--bg-raised); border:1px solid var(--border); color:var(--text-muted); border-radius:6px; padding:6px 10px; cursor:pointer; display:flex; align-items:center; gap:6px; }
+.modal-nav-btn:hover:not(:disabled){ color:var(--text); border-color:var(--text-dim); }
+.modal-nav-btn:disabled{ opacity:0.35; cursor:default; }
+.modal-ministrip{ position:sticky; top:0; z-index:5; margin:0 -24px 0; padding:0 24px; background:var(--bg-panel); display:flex; gap:16px; overflow-x:auto; max-height:0; opacity:0; transition:max-height .18s ease, opacity .18s ease, padding .18s ease, border-color .18s ease; border-bottom:1px solid transparent; }
+.modal-ministrip.scrolled{ max-height:54px; opacity:1; padding:10px 24px; border-bottom-color:var(--border); }
+.modal-ministrip .ms-item{ font-family:var(--font-mono); font-size:11.5px; color:var(--text-muted); white-space:nowrap; }
+.modal-ministrip .ms-item b{ color:var(--text); }
+.plan-tie-in{ display:flex; gap:10px; align-items:flex-start; background:var(--bg-raised); border:1px solid var(--border-soft); border-radius:6px; padding:12px 14px; margin-bottom:16px; font-size:12.5px; color:var(--text-muted); line-height:1.5; }
+.plan-tie-in b{ color:var(--text); }
+.insight-banner{ display:flex; gap:10px; align-items:flex-start; border-radius:6px; padding:11px 14px; margin-bottom:16px; font-size:12.5px; line-height:1.5; }
+.insight-banner.tone-good{ background:var(--teal-dim); color:var(--teal); }
+.insight-banner.tone-watch{ background:var(--warn-dim); color:var(--warn); }
+.insight-banner b{ color:inherit; }
+.route-map-wrap{ position:relative; }
+.route-hover-readout{ position:absolute; top:8px; left:8px; z-index:450; background:var(--bg-panel); border:1px solid var(--border); border-radius:6px; padding:5px 9px; font-family:var(--font-mono); font-size:11px; color:var(--text-muted); pointer-events:none; opacity:0; transition:opacity .1s; }
+.route-hover-readout.show{ opacity:1; }
+.splits-hover-dot{ position:absolute; top:0; width:9px; height:9px; margin-left:-4.5px; margin-top:-4.5px; border-radius:50%; background:var(--warn); border:2px solid var(--bg-panel); pointer-events:none; opacity:0; z-index:4; }
+.splits-hover-dot.show{ opacity:1; }
+.route-pace-legend{ display:flex; align-items:center; gap:8px; margin-top:8px; font-size:11px; color:var(--text-muted); }
+.route-pace-legend .ramp{ width:90px; height:8px; border-radius:4px; background:linear-gradient(90deg, #00B4E0, #FFB020); }
 """
 
 JS = r"""
@@ -1858,7 +2068,136 @@ const TYPE_COLORS = {'Long Run':'#45D6B0','Easy Run':'#7E8EA3','Tempo':'#FFB020'
 // sequential-for-magnitude encodings).
 const VOL_RAMP = ['#0F3D4D','#0F4757','#14627A','#0D7FA0','#0093BC','#00A0CC','#00B4E0'];
 function rampColor(frac, ramp){ const i=Math.round(Math.max(0,Math.min(1,frac))*(ramp.length-1)); return ramp[i]; }
+// v15 — great-circle distance in miles, same formula as the Python haversine_m,
+// used client-side to build a cumulative-distance array along a route's GPS
+// points (route points and mile splits come from two separately-sampled
+// Garmin streams, so matching them is a "same fraction of total distance"
+// approximation, not an exact index correspondence — see renderRouteMap).
+function haversineMi(lat1,lon1,lat2,lon2){
+  const R=3958.8, toRad=d=>d*Math.PI/180;
+  const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(Math.min(1,a)));
+}
+// Fast (cyan) → slow (amber) two-hue gradient for pace-colored route segments —
+// a diverging-style encoding around the run's own pace range, not an absolute
+// pace scale, so it stays legible whether the run was a 7:30 tempo or a
+// 12:30 recovery jog.
+function paceToColor(pace, minPace, maxPace){
+  if(maxPace<=minPace) return '#00B4E0';
+  const f = Math.max(0, Math.min(1, (pace-minPace)/(maxPace-minPace)));
+  const lerp=(a,b,t)=>Math.round(a+(b-a)*t);
+  const c1=[0,180,224], c2=[255,176,32]; // #00B4E0 -> #FFB020
+  return `rgb(${lerp(c1[0],c2[0],f)},${lerp(c1[1],c2[1],f)},${lerp(c1[2],c2[2],f)})`;
+}
 function safe(name, fn){ try{ fn(); } catch(e){ console.error('Section failed:', name, e); const el=document.getElementById('boot-errors'); if(el){ el.style.display='block'; el.innerHTML += `<div>Section "${name}" failed: ${e.message}</div>`; } } }
+
+// v15 — fixed categorical colors for the TRAINING_PLAN session types (distinct
+// from TYPE_COLORS above, which classifies REAL Garmin runs) and for the
+// training-plan phases, used by the This Week panel and the Plan vs. Actual
+// chart's phase shading. Assigned in a fixed order, never cycled/generated.
+const PLAN_TYPE_COLORS = {
+  'Intervals':'#00B4E0', 'Tempo':'#FFB020', 'Long Run':'#45D6B0', 'Easy':'#2FD480', 'Race':'#FF5A64',
+  'Rest':'#57636F', 'Cross Training':'#9B8CFF', 'Strength — Heavy':'#C97E6B', 'Strength — Light':'#D9A68C',
+};
+const PHASE_COLORS = {
+  'Reintroduction':'#57636F', 'Rebuild':'#2FD480', 'Taper begins':'#FFB020', 'Deep taper':'#9B8CFF', 'Race Week':'#FF5A64',
+};
+function planTypeColor(t){ return PLAN_TYPE_COLORS[t] || '#57636F'; }
+function phaseColor(p){ return PHASE_COLORS[p] || '#57636F'; }
+const DAY_ORDER = ['mon','tue','wed','thu','fri','sat','sun'];
+const DAY_NAMES = {mon:'Mon',tue:'Tue',wed:'Wed',thu:'Thu',fri:'Fri',sat:'Sat',sun:'Sun'};
+
+// v15 — light/dark theme toggle. Persisted per-browser via localStorage
+// (wrapped in try/catch: a private window or blocked storage just falls back
+// to the default dark theme every load rather than erroring).
+safe('theme toggle', function(){
+  const root = document.documentElement;
+  const btn = document.getElementById('theme-toggle');
+  let saved = null;
+  try{ saved = localStorage.getItem('garmin-dashboard-theme'); }catch(e){}
+  if(saved === 'light' || saved === 'dark') root.dataset.theme = saved;
+  function current(){ return root.dataset.theme === 'light' ? 'light' : 'dark'; }
+  function paintIcon(){ btn.textContent = current()==='light' ? '☀' : '☽'; }
+  paintIcon();
+  btn.addEventListener('click', ()=>{
+    const next = current()==='light' ? 'dark' : 'light';
+    root.dataset.theme = next;
+    try{ localStorage.setItem('garmin-dashboard-theme', next); }catch(e){}
+    paintIcon();
+    redrawCharts();
+  });
+});
+
+// v15 — info-tap glossary. One shared popover element, repositioned under
+// whichever (i) button was clicked; closes on outside click, Escape, or a
+// second click on the same button. Kept intentionally short — a sentence or
+// two, not a full explainer — since it's a tap-to-glance, not a reading task.
+const INFO_TIPS = {
+  readiness: 'Garmin’s blend of HRV status, sleep, recovery time and recent training load into a single 0–100 score for how ready your body is for a hard effort today.',
+  acwr: 'Acute:Chronic Workload Ratio — this week’s mileage against your rolling 4-week average. Below ~0.8 often means detraining; above ~1.5 is a classic injury-risk spike.',
+  hrv: 'Heart rate variability overnight. A dip below your personal baseline is one of the earlier signs of accumulated fatigue or illness, often before perceived effort changes.',
+  effortmix: 'The share of recent training minutes spent easy vs. moderate vs. hard. The dashed band is a general 80/20-style target — most endurance runners do best heavily weighted easy.',
+  efficiency: 'Speed per heartbeat on easy/long runs — distance covered per beat of average HR. Rising over time is a sign of aerobic fitness gains that pace alone can hide (pace is thrown off by heat, hills, wind; this mostly isn’t).',
+};
+safe('info tips', function(){
+  let openBtn = null;
+  const pop = document.createElement('div');
+  pop.className = 'info-tip-pop';
+  document.body.appendChild(pop);
+  function closeTip(){ pop.classList.remove('show'); if(openBtn) openBtn.classList.remove('open'); openBtn=null; }
+  document.addEventListener('click', e=>{
+    const btn = e.target.closest('.info-tip-btn');
+    if(!btn){ if(!e.target.closest('.info-tip-pop')) closeTip(); return; }
+    e.stopPropagation();
+    if(openBtn === btn){ closeTip(); return; }
+    closeTip();
+    const text = INFO_TIPS[btn.dataset.infoKey] || '';
+    pop.innerHTML = text;
+    pop.classList.add('show');
+    openBtn = btn;
+    const r = btn.getBoundingClientRect();
+    const pw = 240;
+    let left = r.left + window.scrollX - pw/2 + r.width/2;
+    left = Math.max(10, Math.min(left, window.scrollX + window.innerWidth - pw - 10));
+    pop.style.left = left + 'px';
+    pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
+  });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeTip(); });
+  // No scroll-close listener here: the popover is position:absolute against
+  // the document (not fixed), so it scrolls naturally with the page and
+  // stays anchored near its button — and a scroll-to-close listener raced
+  // against the browser's own scroll-element-into-view behavior on the very
+  // click that opens it (a focus/click on an off-screen button scrolls first),
+  // closing the popover the instant it opened.
+});
+
+// v15 — mobile quick-nav. Only visible under the CSS breakpoint, but harmless
+// (just hidden) on desktop, so it's always wired up rather than conditionally
+// built. Highlights whichever tracked section is currently most in view.
+safe('mobile tabbar', function(){
+  const bar = document.getElementById('mobile-tabbar');
+  if(!bar) return;
+  const buttons = [...bar.querySelectorAll('button')];
+  buttons.forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const target = document.getElementById(b.dataset.target);
+      if(target) target.scrollIntoView({behavior:'smooth', block:'start'});
+    });
+  });
+  const sections = buttons.map(b=>document.getElementById(b.dataset.target)).filter(Boolean);
+  if(!sections.length || typeof IntersectionObserver==='undefined') return;
+  const byId = {}; buttons.forEach(b=>{ byId[b.dataset.target]=b; });
+  const observer = new IntersectionObserver(entries=>{
+    entries.forEach(entry=>{
+      if(entry.isIntersecting){
+        buttons.forEach(b=>b.classList.remove('active'));
+        const b = byId[entry.target.id]; if(b) b.classList.add('active');
+      }
+    });
+  }, {rootMargin:'-20% 0px -70% 0px'});
+  sections.forEach(s=>observer.observe(s));
+});
 const SVGNS='http://www.w3.org/2000/svg';
 function el(tag, attrs){ const e=document.createElementNS(SVGNS,tag); for(const k in attrs) e.setAttribute(k, attrs[k]); return e; }
 function niceTicks(min,max,count){ if(min===max){min-=1;max+=1;} const range=max-min, rough=range/count, mag=Math.pow(10,Math.floor(Math.log10(rough))), norm=rough/mag; let step; if(norm<1.5) step=mag; else if(norm<3) step=2*mag; else if(norm<7) step=5*mag; else step=10*mag; const niceMin=Math.floor(min/step)*step, niceMax=Math.ceil(max/step)*step; const ticks=[]; for(let v=niceMin;v<=niceMax+step*0.001;v+=step) ticks.push(Math.round(v*1000)/1000); return ticks; }
@@ -2192,10 +2531,15 @@ function renderVolumeWindow(container, weekly, view){
   const milesBarW=Math.min(bandW*0.44,70), lrBarW=Math.min(bandW*0.24,36);
   const clipId='vol-clip-'+Math.random().toString(36).slice(2);
   const clip=el('clipPath',{id:clipId}); clip.appendChild(el('rect',{x:M.left,y:M.top,width:plotW,height:plotH})); svg.appendChild(clip);
+  // v15 — PR badge: the single highest-mileage week in the ENTIRE history
+  // (not just the visible window), so panning/zooming never moves which bar
+  // wears the badge. Only drawn when that week happens to be on screen.
+  let peakIdx=-1, peakMiles=-1;
+  weekly.forEach((w,i)=>{ if(w.miles>peakMiles){ peakMiles=w.miles; peakIdx=i; } });
   visibleIdx.forEach((i,k)=>{
     const w=weekly[i], cx=xCenter(i), mBarX=cx-milesBarW-2, mBarY=yScale(w.miles);
     const mBar=el('rect',{class:'data-point',x:mBarX,y:mBarY,width:milesBarW,height:(M.top+plotH)-mBarY,fill:rampColor(w.miles/maxMiles,VOL_RAMP),rx:2});
-    mBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Miles: <b>${w.miles.toFixed(1)}</b></div><div class="tt-row">Runs: <b>${w.runs}</b></div>${w.longRunMiles?`<div class="tt-row">Long run: <b>${w.longRunMiles.toFixed(1)}mi</b></div>`:''}`));
+    mBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Miles: <b>${w.miles.toFixed(1)}</b></div><div class="tt-row">Runs: <b>${w.runs}</b></div>${w.longRunMiles?`<div class="tt-row">Long run: <b>${w.longRunMiles.toFixed(1)}mi</b></div>`:''}${i===peakIdx?'<div class="tt-row" style="color:#FFB020;">★ Peak week, all-time</div>':''}`));
     mBar.addEventListener('mousemove',positionTooltip); mBar.addEventListener('mouseleave',hideTooltip);
     svg.appendChild(mBar);
     if(w.longRunMiles){
@@ -2204,6 +2548,11 @@ function renderVolumeWindow(container, weekly, view){
       lrBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Long run: <b>${w.longRunMiles.toFixed(1)}mi</b></div>`));
       lrBar.addEventListener('mousemove',positionTooltip); lrBar.addEventListener('mouseleave',hideTooltip);
       svg.appendChild(lrBar);
+    }
+    if(i===peakIdx && peakMiles>0){
+      const star=el('text',{x:cx,y:mBarY-8,'text-anchor':'middle'});
+      star.style.fill='#FFB020'; star.style.fontSize='13px'; star.textContent='★';
+      svg.appendChild(star);
     }
     if(volLabels.has(k)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.label; svg.appendChild(xl); }
   });
@@ -2235,9 +2584,35 @@ function renderPlanWindow(container, planWeeks, view){
   const yScale=v=>M.top+plotH-(v/yMax)*plotH;
   const bandW=plotW/(view.end-view.start), xCenter=i=>M.left+(i-view.start)*bandW+bandW/2;
   const wkLabels=labelIndices(visibleIdx.length, plotW, widestLabelPx(visibleIdx.map(i=>planWeeks[i].weekLabel)));
+  // v15 — phase shading: a faint background band per training phase, grouped
+  // across consecutive same-phase weeks so a multi-week phase reads as one
+  // band rather than one tint per bar. Drawn first so the planned/actual
+  // bars sit visually on top of it. Low opacity — identity here is a
+  // secondary encoding, the bars still carry the primary data.
+  let bandStartK=0;
+  for(let k=0;k<=visibleIdx.length;k++){
+    const samePhase = k<visibleIdx.length && planWeeks[visibleIdx[k]].phase===planWeeks[visibleIdx[bandStartK]].phase;
+    if(!samePhase){
+      const i0=visibleIdx[bandStartK], i1=visibleIdx[k-1];
+      const x0=M.left+(i0-view.start)*bandW, x1=M.left+(i1+1-view.start)*bandW;
+      const phase=planWeeks[i0].phase;
+      svg.appendChild(el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,0),height:plotH,fill:phaseColor(phase),'fill-opacity':0.09}));
+      if((x1-x0)>36){
+        const lbl=el('text',{x:(x0+x1)/2,y:M.top+12,'text-anchor':'middle'});
+        lbl.style.fill=phaseColor(phase); lbl.style.fontWeight='600'; lbl.style.fontSize='9.5px'; lbl.style.textTransform='uppercase'; lbl.style.letterSpacing='0.04em';
+        lbl.textContent=phase;
+        svg.appendChild(lbl);
+      }
+      bandStartK=k;
+    }
+  }
   yTicks.forEach(t=>{ svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:yScale(t),y2:yScale(t)})); const lbl=el('text',{x:M.left-8,y:yScale(t)+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
   const yTitle=el('text',{x:10,y:12}); yTitle.textContent='miles'; svg.appendChild(yTitle);
   const plannedBarW=Math.min(bandW*0.34,60), actualBarW=Math.min(bandW*0.34,60);
+  // v15 — race-day marker: TRAINING_PLAN's last week is always race week (see
+  // the Python plan constant), so flag it with a dashed line + flag glyph
+  // rather than trying to place a day-precise marker on a weekly-bucketed axis.
+  const raceWeekIdx = planWeeks.length-1;
   visibleIdx.forEach((i,k)=>{
     const w=planWeeks[i], cx=xCenter(i);
     const pBarX=cx-plannedBarW-2, pBarY=yScale(w.plannedMi||0);
@@ -2251,6 +2626,14 @@ function renderPlanWindow(container, planWeeks, view){
       aBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.weekLabel}</div><div class="tt-row">${w.phase}</div><div class="tt-row">Actual: <b>${w.actualMi.toFixed(1)}mi</b></div>${w.adherencePct!=null?`<div class="tt-row">Adherence: <b>${w.adherencePct}%</b></div>`:''}`));
       aBar.addEventListener('mousemove',positionTooltip); aBar.addEventListener('mouseleave',hideTooltip);
       svg.appendChild(aBar);
+    }
+    if(i===raceWeekIdx){
+      const flag=el('text',{x:cx,y:M.top-10,'text-anchor':'middle'});
+      flag.style.fontSize='13px'; flag.textContent='🏁';
+      flag.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Race Day</div><div class="tt-row">${w.weekLabel} — ${DATA.meta.raceName}</div>`));
+      flag.addEventListener('mousemove',positionTooltip); flag.addEventListener('mouseleave',hideTooltip);
+      svg.appendChild(flag);
+      svg.appendChild(el('line',{x1:cx,x2:cx,y1:M.top,y2:M.top+plotH,stroke:'#FF5A64','stroke-width':1.5,'stroke-dasharray':'3,3'}));
     }
     if(wkLabels.has(k)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.weekLabel; svg.appendChild(xl); }
   });
@@ -2340,7 +2723,8 @@ function registerSeriesChart(containerId, title, pts, valueKey, color){
   });
 }
 
-function renderSplitsWindow(container, splits, view, legendId, elevProfile, mileBased){
+let SPLITS_SYNC_TARGETS = {};
+function renderSplitsWindow(container, splits, view, legendId, elevProfile, mileBased, syncId){
   if(mileBased===undefined) mileBased=true; // older cached data with no flag — assume the common case
   if(!splits.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; if(legendId){ const lg=document.getElementById(legendId); if(lg) lg.innerHTML=''; } return; }
   const {w:W,h:H}=chartSize(container,720,320), M={top:28,right:20,bottom:34,left:50};
@@ -2424,8 +2808,9 @@ function renderSplitsWindow(container, splits, view, legendId, elevProfile, mile
   visibleIdx.forEach(i=>{
     const s=splits[i], x0=distScale(cum[i]), x1=distScale(cum[i+1]);
     const hit=el('rect',{x:x0,y:M.top,width:Math.max(x1-x0,1),height:plotH,fill:'transparent'});
-    hit.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`));
-    hit.addEventListener('mousemove',positionTooltip); hit.addEventListener('mouseleave',hideTooltip);
+    hit.addEventListener('mouseenter',e=>{ showTooltip(e,`<div class="tt-title">${splitTitle(s)}</div><div class="tt-row">Elevation gain: <b>+${s.elevGainFt||0}ft</b></div>`); if(syncId && ROUTE_SYNC_TARGETS[syncId]) ROUTE_SYNC_TARGETS[syncId].setFraction(((cum[i]+cum[i+1])/2)/(cum[cum.length-1]||1)); });
+    hit.addEventListener('mousemove',positionTooltip);
+    hit.addEventListener('mouseleave',()=>{ hideTooltip(); if(syncId && ROUTE_SYNC_TARGETS[syncId]) ROUTE_SYNC_TARGETS[syncId].clear(); });
     svg.appendChild(hit);
     if(mileLabels.has(i)){ const xl=el('text',{x:xCenter(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent = isSemanticLabel(s) ? s.mile : (mileBased?'Mi ':'Lap ')+s.mile; svg.appendChild(xl); }
   });
@@ -2463,6 +2848,30 @@ function renderSplitsWindow(container, splits, view, legendId, elevProfile, mile
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
   container.appendChild(svg);
+  // v15 — synced hover target: a small absolutely-positioned dot (not SVG, so
+  // it survives independently of the next svg redraw) that the route map's
+  // own hover handler can move along this chart's x-axis, matched by
+  // "same fraction of total run distance" between the two datasets. Each
+  // split's own hover rect (above) drives the map the other direction — see
+  // renderRouteMap. cumTotal/distScale close over the CURRENT zoom window, so
+  // a fraction that's panned/zoomed out of view is simply not shown.
+  if(syncId){
+    container.style.position = container.style.position || 'relative';
+    const dot = document.createElement('div');
+    dot.className = 'splits-hover-dot';
+    container.appendChild(dot);
+    const cumTotal = cum[cum.length-1] || 1;
+    SPLITS_SYNC_TARGETS[syncId] = {
+      setFraction(frac){
+        const d = frac*cumTotal;
+        if(d < winStartDist-0.001 || d > winEndDist+0.001){ dot.classList.remove('show'); return; }
+        dot.style.left = distScale(d)+'px';
+        dot.style.top = (M.top+plotH*0.5)+'px';
+        dot.classList.add('show');
+      },
+      clear(){ dot.classList.remove('show'); }
+    };
+  }
   // Legend lives in its own HTML row (not SVG text) so it wraps naturally on
   // narrow screens instead of colliding with the axis titles at a fixed pixel spot.
   if(legendId){
@@ -2591,7 +3000,7 @@ function renderIntervalTimeWindow(container, timeSeries, view, legendId){
 // way it registers through registerZoomChart so the chart is windowed/pannable
 // like every other chart — for the time chart the "index" domain is elapsed
 // seconds rather than a point count.
-function registerSplitsChart(containerId, title, splits, legendId, elevProfile, mileBased, timeSeries){
+function registerSplitsChart(containerId, title, splits, legendId, elevProfile, mileBased, timeSeries, syncId){
   if(!mileBased && timeSeries){
     const totalTime = timeSeries.bands[timeSeries.bands.length-1].end;
     registerZoomChart(containerId, {
@@ -2602,7 +3011,7 @@ function registerSplitsChart(containerId, title, splits, legendId, elevProfile, 
   } else {
     registerZoomChart(containerId, {
       title, data:splits, domainSize:splits.length, minWindow:Math.min(splits.length,3),
-      render:(container,data,view)=>renderSplitsWindow(container,data,view,legendId,elevProfile,mileBased),
+      render:(container,data,view)=>renderSplitsWindow(container,data,view,legendId,elevProfile,mileBased,syncId),
       rangeFmt:(data,view,zoomed)=>{
         if(!data.length) return '';
         const lo=Math.max(0,Math.round(view.start)), hi=Math.min(data.length-1,Math.round(view.end));
@@ -2617,12 +3026,18 @@ function registerSplitsChart(containerId, title, splits, legendId, elevProfile, 
 // modal (or a resize while one's open) can find and clean up/resize the
 // right instance instead of leaking map objects every time a run is clicked.
 let ROUTE_MAP_INSTANCES={};
-function renderRouteMap(containerId, points){
+// v15 — the MAP side of the route↔splits sync (see SPLITS_SYNC_TARGETS and
+// its doc comment above): keyed by the same syncId, exposes setFraction(frac)
+// so a split's hover can move a marker along the route.
+let ROUTE_SYNC_TARGETS={};
+function renderRouteMap(containerId, points, opts){
+  opts = opts || {};
   const container=document.getElementById(containerId);
   if(!container) return;
   if(!points || points.length<2){ container.innerHTML="<p class='empty'>No GPS route available for this run.</p>"; return; }
   if(typeof L==='undefined'){ container.innerHTML="<p class='empty'>Map failed to load — check your internet connection and reopen this run.</p>"; return; }
   if(ROUTE_MAP_INSTANCES[containerId]){ try{ ROUTE_MAP_INSTANCES[containerId].remove(); }catch(e){} delete ROUTE_MAP_INSTANCES[containerId]; }
+  if(opts.syncId) delete ROUTE_SYNC_TARGETS[opts.syncId];
   container.innerHTML='';
   const latlngs=points.map(p=>[p[0],p[1]]);
   const map=L.map(container,{scrollWheelZoom:false});
@@ -2645,10 +3060,79 @@ function renderRouteMap(containerId, points){
       attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
     }).addTo(map);
   }
-  const line=L.polyline(latlngs,{color:'#00B4E0',weight:4,opacity:0.95,lineJoin:'round',lineCap:'round'}).addTo(map);
+
+  // v15 — pace-colored route: split the polyline into one short segment per
+  // pair of consecutive GPS points, colored by the pace of whichever mile
+  // split that stretch of the route falls into. Route points and mile splits
+  // are two independently-sampled Garmin streams with no shared index, so
+  // the match is "this point is N% of the way along the route, so look at
+  // the split N% of the way along the splits" — an approximation, not an
+  // exact correspondence, but a good one for a visual color cue. Falls back
+  // to a flat single-color line (the pre-v15 look) whenever there isn't
+  // enough pace variation to make coloring meaningful, or splits aren't
+  // mile-based (a structured workout's "miles" aren't comparable distances).
+  const splits = opts.splits;
+  const paced = (opts.mileBased!==false && splits) ? splits.filter(s=>s.pace>0) : [];
+  let ptCum=null, totalPtDist=0, splitCum=null, totalSplitDist=0, minPace=0, maxPace=0;
+  const canColor = paced.length>=2;
+  if(canColor){
+    ptCum=[0];
+    for(let i=1;i<points.length;i++) ptCum.push(ptCum[i-1]+haversineMi(points[i-1][0],points[i-1][1],points[i][0],points[i][1]));
+    totalPtDist = ptCum[ptCum.length-1] || 1;
+    const lapDist = splits.map(s=>(s.distMi!=null && s.distMi>0) ? s.distMi : 1);
+    splitCum=[0]; lapDist.forEach(d=>splitCum.push(splitCum[splitCum.length-1]+d));
+    totalSplitDist = splitCum[splitCum.length-1] || 1;
+    minPace=Math.min(...paced.map(s=>s.pace)); maxPace=Math.max(...paced.map(s=>s.pace));
+  }
+  function splitPaceAt(frac){
+    const target = frac*totalSplitDist;
+    let j=0; while(j<splitCum.length-2 && splitCum[j+1]<target) j++;
+    const p = splits[j] ? splits[j].pace : null;
+    return (p>0) ? p : null;
+  }
+  let line;
+  if(canColor && maxPace>minPace+0.05){
+    const segGroup = L.layerGroup().addTo(map);
+    const readout = opts.readoutId ? document.getElementById(opts.readoutId) : null;
+    for(let i=0;i<points.length-1;i++){
+      const midFrac = ((ptCum[i]+ptCum[i+1])/2)/totalPtDist;
+      const pace = splitPaceAt(midFrac);
+      const color = pace!=null ? paceToColor(pace, minPace, maxPace) : '#7E8EA3';
+      const seg = L.polyline([latlngs[i],latlngs[i+1]], {color, weight:4.5, opacity:0.95, lineCap:'round'}).addTo(segGroup);
+      if(opts.syncId){
+        seg.on('mouseover', ()=>{
+          if(SPLITS_SYNC_TARGETS[opts.syncId]) SPLITS_SYNC_TARGETS[opts.syncId].setFraction(midFrac);
+          if(readout){ readout.textContent = pace!=null ? `${paceStr(pace)}/mi` : '—'; readout.classList.add('show'); }
+        });
+        seg.on('mouseout', ()=>{
+          if(SPLITS_SYNC_TARGETS[opts.syncId]) SPLITS_SYNC_TARGETS[opts.syncId].clear();
+          if(readout) readout.classList.remove('show');
+        });
+      }
+    }
+    line = L.polyline(latlngs, {opacity:0}); // invisible — exists only so fitBounds below has a single geometry to read
+  } else {
+    line = L.polyline(latlngs,{color:'#00B4E0',weight:4,opacity:0.95,lineJoin:'round',lineCap:'round'}).addTo(map);
+  }
   L.circleMarker(latlngs[0],{radius:6,color:'#0E141C',weight:2,fillColor:'#2FD480',fillOpacity:1}).addTo(map).bindTooltip('Start');
   L.circleMarker(latlngs[latlngs.length-1],{radius:6,color:'#0E141C',weight:2,fillColor:'#FF5A64',fillOpacity:1}).addTo(map).bindTooltip('Finish');
   map.fitBounds(line.getBounds(),{padding:[18,18]});
+
+  // The map side of the sync: a hover dot driven by the SPLITS chart (see
+  // SPLITS_SYNC_TARGETS doc comment), positioned at the route point nearest
+  // the target fraction of total route distance.
+  if(opts.syncId && canColor){
+    const hoverMarker = L.circleMarker(latlngs[0],{radius:7,color:'#0E141C',weight:2,fillColor:'#FFB020',opacity:0,fillOpacity:0}).addTo(map);
+    ROUTE_SYNC_TARGETS[opts.syncId] = {
+      setFraction(frac){
+        const targetDist = Math.max(0,Math.min(1,frac))*totalPtDist;
+        let j=0; while(j<ptCum.length-1 && ptCum[j]<targetDist) j++;
+        hoverMarker.setLatLng(latlngs[j]);
+        hoverMarker.setStyle({opacity:1, fillOpacity:1});
+      },
+      clear(){ hoverMarker.setStyle({opacity:0, fillOpacity:0}); }
+    };
+  }
   ROUTE_MAP_INSTANCES[containerId]=map;
 }
 
@@ -2660,7 +3144,7 @@ function renderRouteMap(containerId, points){
 // resize, so registerZoomChart sees the SAME array reference each time and
 // correctly treats a resize as "redraw at current zoom" rather than "new
 // data, reset the zoom" — see registerZoomChart's doc comment above.
-let RUNS_ASC=null, PACED_RUNS_ASC=null, ACTIVE_SPLIT_ID=null, HRV_PTS=null, VO2_PTS=null, EF_PTS=null;
+let RUNS_ASC=null, PACED_RUNS_ASC=null, ACTIVE_SPLIT_ID=null, HRV_PTS=null, VO2_PTS=null, EF_PTS=null, CURRENT_RUN_ID=null;
 function redrawCharts(){
   safe('redraw volume', ()=>registerVolumeChart('chart-volume', 'Weekly Volume & Training Load', DATA.weekly));
   safe('redraw plan', ()=>registerPlanChart('chart-plan', 'Plan vs. Actual', DATA.planComparison));
@@ -2731,6 +3215,57 @@ safe('recommendation panel', function(){
   `;
 });
 
+safe('goal reassessment panel', function(){
+  const g = DATA.goalReassessment;
+  const section = document.getElementById('goal-reassessment-section');
+  if(!g || !g.findings || !g.findings.length) return;
+  section.style.display = '';
+  document.getElementById('goal-updated-note').textContent = `Reassessed ${fmtDate(g.updated)}`;
+  document.getElementById('goal-panel').innerHTML = `
+    <div class="goal-head">
+      <div><span class="goal-prior">${g.priorGoal}</span> &rarr; <span class="goal-range">${g.revisedGoalLabel}</span></div>
+      <div class="dial-label">${g.revisedPaceLabel} avg pace &middot; PR ${durStr(DATA.meta.priorPrSec/60)} unchanged</div>
+    </div>
+    <div class="goal-findings">${g.findings.map(f=>`<div class="goal-finding"><div class="gf-label">${f.label}</div><div class="gf-text">${f.text}</div></div>`).join('')}</div>
+  `;
+});
+
+safe('this week panel', function(){
+  const plan = DATA.planComparison || [];
+  const todayIso = DATA.meta.lastSynced;
+  const idx = plan.findIndex(w => w.weekStart <= todayIso && todayIso <= w.weekEnd);
+  const panel = document.getElementById('this-week-panel');
+  if(idx === -1){ panel.innerHTML = "<p class='empty'>No active plan week right now — see the full plan below.</p>"; return; }
+  const wk = plan[idx];
+  const prev = idx>0 ? plan[idx-1] : null;
+  const recapBits = [`<span>Week ${idx+1} of ${plan.length} &middot; <b>${wk.phase}</b></span>`];
+  if(wk.adherencePct!=null) recapBits.push(`<span>${wk.adherencePct}% of weekly target so far (<b>${(wk.actualMi||0).toFixed(1)}</b> / ${wk.plannedMi.toFixed(1)}mi)</span>`);
+  else recapBits.push(`<span>No running logged yet this week</span>`);
+  if(prev && prev.actualMi!=null && wk.actualMi!=null){
+    const delta = wk.actualMi - prev.actualMi;
+    recapBits.push(`<span>${delta>=0?'+':''}${delta.toFixed(1)}mi vs last week (<b>${prev.actualMi.toFixed(1)}mi</b>)</span>`);
+  }
+  if(wk.raceDayMi) recapBits.push(`<span>Race day this week 🏁</span>`);
+  const dayCards = DAY_ORDER.map(dk=>{
+    const s = wk.sessions[dk];
+    if(!s) return '';
+    const isToday = s.date === todayIso;
+    let sub = s.detail;
+    if(s.trackable && s.dayStatus==='done' && s.actualMi!=null){
+      sub = `Planned ${s.targetMi?s.targetMi.toFixed(2)+'mi':'—'} &rarr; <b>${s.actualMi.toFixed(2)}mi</b>${s.actualPace?` @ ${paceStr(s.actualPace)}/mi`:''}`;
+    }
+    const icon = s.dayStatus==='done' ? '✓' : (s.dayStatus==='missed' ? '!' : (s.type==='Race' ? '🏁' : ''));
+    return `<div class="week-day-card ${isToday?'is-today':''} status-${s.dayStatus}">
+      ${icon?`<span class="wd-status-icon">${icon}</span>`:''}
+      <div class="wd-name">${DAY_NAMES[dk]} &middot; ${fmtDate(s.date)}${isToday?'<span class="wd-today-chip">TODAY</span>':''}</div>
+      <span class="wd-type" style="background:${planTypeColor(s.type)}">${s.type}</span>
+      <div class="wd-title">${s.title}</div>
+      <div class="wd-sub">${sub}</div>
+    </div>`;
+  }).join('');
+  panel.innerHTML = `<div class="week-recap">${recapBits.join('')}</div><div class="week-days">${dayCards}</div>`;
+});
+
 safe('weekly volume chart', function(){ registerVolumeChart('chart-volume', 'Weekly Volume & Training Load', DATA.weekly); });
 
 safe('plan vs actual', function(){
@@ -2754,6 +3289,8 @@ safe('plan vs actual', function(){
       <td><span class="badge ${badgeClass}">${badgeLabel}</span></td>
     </tr>`;
   }).join('');
+  const phases = [...new Set(plan.map(w=>w.phase))];
+  document.getElementById('phase-legend').innerHTML = phases.map(p=>`<span class="phase-chip"><span class="dot" style="background:${phaseColor(p)}"></span>${p}</span>`).join('') + `<span class="phase-chip">🏁 Race day</span>`;
 });
 
 safe('pace progression chart', function(){
@@ -2882,9 +3419,53 @@ safe('run table', function(){
   render();
 });
 
+// v15 — finds the planned session (if any) within a day of a given run date,
+// restricted to trackable types, for the modal's "planned vs. actual" tie-in.
+// Same ±1-day tolerance the Python side uses for its own matching, so a run
+// logged a day off its scheduled slot still ties back to the right session.
+function findPlannedSession(dateStr){
+  const d = new Date(dateStr+'T12:00:00');
+  let best=null, bestDiff=1.001;
+  (DATA.planComparison||[]).forEach(wk=>{
+    Object.values(wk.sessions||{}).forEach(s=>{
+      if(!s.trackable) return;
+      const diff = Math.abs((d-new Date(s.date+'T12:00:00'))/86400000);
+      if(diff<=bestDiff){ bestDiff=diff; best=s; }
+    });
+  });
+  return best;
+}
+// v15 — a plain-language negative/positive split read for mile-based runs:
+// compares the average pace of the first half of splits to the second half.
+// Skipped for structured workouts (intervals/tempo segments aren't a
+// meaningful "first half vs second half" comparison the way mile splits are).
+function splitInsight(splits, mileBased){
+  if(!mileBased || splits.length<4) return null;
+  const paced = splits.filter(s=>s.pace>0);
+  if(paced.length<4) return null;
+  const mid = Math.floor(splits.length/2);
+  const firstHalf = splits.slice(0,mid).filter(s=>s.pace>0);
+  const secondHalf = splits.slice(mid).filter(s=>s.pace>0);
+  if(!firstHalf.length || !secondHalf.length) return null;
+  const avg = arr => arr.reduce((s,x)=>s+x.pace,0)/arr.length;
+  const firstAvg = avg(firstHalf), secondAvg = avg(secondHalf);
+  const diffSec = Math.round((firstAvg-secondAvg)*60); // positive = 2nd half faster
+  if(Math.abs(diffSec)<8) return {tone:'good', text:`Even pacing — first and second half within a few seconds per mile of each other.`};
+  if(diffSec>0) return {tone:'good', text:`Negative split — the second half ran <b>${diffSec}s/mi</b> faster than the first.`};
+  return {tone:'watch', text:`Positive split — the second half ran <b>${Math.abs(diffSec)}s/mi</b> slower than the first.`};
+}
+
 safe('run detail modal', function(){
   const modal = document.getElementById('run-modal');
   const body = document.getElementById('modal-body');
+  const ministrip = document.getElementById('modal-ministrip');
+  const prevBtn = document.getElementById('modal-prev');
+  const nextBtn = document.getElementById('modal-next');
+  let navList = null;
+  function getNavList(){
+    if(!navList) navList = [...DATA.runs].sort((a,b)=> new Date(b.date)-new Date(a.date));
+    return navList;
+  }
   function closeModal(){
     modal.style.display='none';
     document.body.style.overflow='';
@@ -2893,10 +3474,14 @@ safe('run detail modal', function(){
   document.getElementById('modal-close').addEventListener('click', closeModal);
   modal.addEventListener('click', e=>{ if(e.target===modal) closeModal(); });
   document.addEventListener('keydown', e=>{ if(e.key==='Escape' && modal.style.display!=='none') closeModal(); });
+  modal.addEventListener('scroll', ()=>{ ministrip.classList.toggle('scrolled', modal.scrollTop>40); });
+  prevBtn.addEventListener('click', ()=>{ const list=getNavList(); const i=list.findIndex(r=>String(r.id)===String(CURRENT_RUN_ID)); if(i>=0 && i<list.length-1) window.openRunModal(list[i+1].id); });
+  nextBtn.addEventListener('click', ()=>{ const list=getNavList(); const i=list.findIndex(r=>String(r.id)===String(CURRENT_RUN_ID)); if(i>0) window.openRunModal(list[i-1].id); });
 
   window.openRunModal = function(id){
     const run = DATA.runs.find(r=>String(r.id)===String(id));
     if(!run) return;
+    CURRENT_RUN_ID = run.id;
     const detail = (DATA.runDetails && DATA.runDetails[String(id)]) || {};
     const splits = detail.splits || [];
     const route = detail.route || null;
@@ -2908,6 +3493,8 @@ safe('run detail modal', function(){
     const mileBased = detail.mileBased !== false;
     const splitsSectionTitle = mileBased ? 'Mile Splits' : 'Lap Splits';
     const splitsFirstCol = mileBased ? 'Mile' : 'Segment';
+    const planned = findPlannedSession(run.date);
+    const insight = splitInsight(splits, mileBased);
 
     const stat = (label, value, unit) => `<div class="modal-stat"><div class="stat-label">${label}</div><div class="stat-value">${value}${unit?`<span class="stat-unit">${unit}</span>`:''}</div></div>`;
     let html = `
@@ -2922,8 +3509,10 @@ safe('run detail modal', function(){
         ${stat('Cadence', run.avgCadence?Math.round(run.avgCadence):'—', run.avgCadence?'spm':'')}
         ${stat('Elev Gain', '+'+(run.elevGainFt??0), 'ft')}
       </div>
+      ${planned ? `<div class="plan-tie-in">📋<div><b>Planned: ${planned.title}</b> — ${planned.detail}${planned.targetMi?` <span class="dial-label">(~${planned.targetMi.toFixed(2)}mi target)</span>`:''}</div></div>` : ''}
+      ${insight ? `<div class="insight-banner tone-${insight.tone}">${insight.tone==='good'?'✓':'⚠'}<div>${insight.text}</div></div>` : ''}
       <div class="modal-section-title">Route</div>
-      ${route && route.length>1 ? `<div class="route-map" id="modal-route"></div><div class="route-legend"><span><span style="color:#2FD480;">●</span> Start</span><span><span style="color:#FF5A64;">●</span> Finish</span></div>` : `<p class="empty">No GPS route available for this run.</p>`}
+      ${route && route.length>1 ? `<div class="route-map-wrap"><div class="route-map" id="modal-route"></div><div class="route-hover-readout" id="modal-route-readout"></div></div><div class="route-legend"><span><span style="color:#2FD480;">●</span> Start</span><span><span style="color:#FF5A64;">●</span> Finish</span></div><div class="route-pace-legend" id="modal-route-pace-legend"></div>` : `<p class="empty">No GPS route available for this run.</p>`}
       <div class="modal-section-title">${splitsSectionTitle}</div>
       ${splits.length ? `
         <div class="chart-box" style="height:220px;"><div id="modal-splits-chart" class="svg-chart"></div></div>
@@ -2935,9 +3524,21 @@ safe('run detail modal', function(){
     `;
     body.innerHTML = html;
     modal.style.display='flex';
+    modal.scrollTop = 0;
+    ministrip.classList.remove('scrolled');
+    ministrip.innerHTML = `<span class="ms-item"><b>${run.distMi.toFixed(2)}mi</b></span><span class="ms-item"><b>${paceStr(run.paceMinMi)}/mi</b></span><span class="ms-item"><b>${durStr(run.durMin)}</b></span>${run.avgHr?`<span class="ms-item"><b>${run.avgHr}</b> bpm</span>`:''}`;
     document.body.style.overflow='hidden';
-    if(route && route.length>1) renderRouteMap('modal-route', route);
-    if(splits.length) registerSplitsChart('modal-splits-chart', `${splitsSectionTitle} — ${run.name}`, splits, 'modal-splits-legend', elevProfile, mileBased, detail.timeSeries);
+    const navListNow = getNavList(); const navIdx = navListNow.findIndex(r=>String(r.id)===String(id));
+    prevBtn.disabled = !(navIdx>=0 && navIdx<navListNow.length-1);
+    nextBtn.disabled = !(navIdx>0);
+    const syncId = (route && route.length>1 && splits.length) ? 'modal' : null;
+    if(route && route.length>1) renderRouteMap('modal-route', route, {splits, mileBased, syncId, readoutId:'modal-route-readout'});
+    if(splits.length) registerSplitsChart('modal-splits-chart', `${splitsSectionTitle} — ${run.name}`, splits, 'modal-splits-legend', elevProfile, mileBased, detail.timeSeries, syncId);
+    const paceLegendEl = document.getElementById('modal-route-pace-legend');
+    if(paceLegendEl){
+      const paced = mileBased ? splits.filter(s=>s.pace>0) : [];
+      paceLegendEl.innerHTML = paced.length>=2 ? `Faster <span class="ramp"></span> Slower — colored by mile pace` : '';
+    }
   };
 });
 """

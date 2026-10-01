@@ -291,7 +291,7 @@ details.plan-expand[open] > summary::before{ content:"\25BE  "; }
 }
 
 /* ---- v15: run-detail modal upgrades ---- */
-.modal-nav-row{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.modal-nav-row{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding-right:40px; } /* v15 hotfix: reserves the same 40px .modal-title already reserves (see its own comment-free but matching padding-right above) so the right-aligned Next button never sits under the absolutely-positioned close button */
 .modal-nav-btn{ font-family:var(--font-mono); font-size:11px; background:var(--bg-raised); border:1px solid var(--border); color:var(--text-muted); border-radius:6px; padding:6px 10px; cursor:pointer; display:flex; align-items:center; gap:6px; }
 .modal-nav-btn:hover:not(:disabled){ color:var(--text); border-color:var(--text-dim); }
 .modal-nav-btn:disabled{ opacity:0.35; cursor:default; }
@@ -1628,7 +1628,6 @@ function renderRouteMap(containerId, points, opts){
     const p = splits[j] ? splits[j].pace : null;
     return (p>0) ? p : null;
   }
-  let line;
   if(canColor && maxPace>minPace+0.05){
     const segGroup = L.layerGroup().addTo(map);
     const readout = opts.readoutId ? document.getElementById(opts.readoutId) : null;
@@ -1674,13 +1673,26 @@ function renderRouteMap(containerId, points, opts){
         });
       }
     }
-    line = L.polyline(latlngs, {opacity:0}); // invisible — exists only so fitBounds below has a single geometry to read
   } else {
-    line = L.polyline(latlngs,{color:'#00B4E0',weight:4,opacity:0.95,lineJoin:'round',lineCap:'round'}).addTo(map);
+    L.polyline(latlngs,{color:'#00B4E0',weight:4,opacity:0.95,lineJoin:'round',lineCap:'round'}).addTo(map);
   }
   L.circleMarker(latlngs[0],{radius:6,color:'#0E141C',weight:2,fillColor:'#2FD480',fillOpacity:1}).addTo(map).bindTooltip('Start');
   L.circleMarker(latlngs[latlngs.length-1],{radius:6,color:'#0E141C',weight:2,fillColor:'#FF5A64',fillOpacity:1}).addTo(map).bindTooltip('Finish');
-  map.fitBounds(line.getBounds(),{padding:[18,18]});
+  // v15 hotfix: fit to bounds built directly from the latlngs array via
+  // L.latLngBounds() — Leaflet's standard, extremely well-trodden way to get a
+  // bounds object from a set of points. The previous approach (an invisible
+  // polyline created only so its own .getBounds() could be read, never added
+  // to the map) is valid per Leaflet's own source — a Polyline computes its
+  // bounds at construction time from the latlngs alone, independent of
+  // whether it's ever attached to the map — but it tripped something in real
+  // Leaflet's minified internals in production: "Route map failed to render —
+  // undefined is not an object (evaluating 't.min')", an error from inside
+  // Leaflet's own code, not ours. The fake Leaflet shim this was tested
+  // against never could have caught that, since it stubs getBounds() with a
+  // dummy object instead of doing real bounds math. This sidesteps whatever
+  // that was by using the one standard API for this instead of a homemade
+  // workaround.
+  map.fitBounds(L.latLngBounds(latlngs), {padding:[18,18]});
 
   // The map side of the sync: a hover dot driven by the SPLITS chart (see
   // SPLITS_SYNC_TARGETS doc comment), positioned at the route point nearest

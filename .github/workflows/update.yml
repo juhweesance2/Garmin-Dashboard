@@ -33,11 +33,13 @@ jobs:
           CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}     # optional (v10)
           GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}   # Google Sheets export; export skips if unset
           SHEET_ID: ${{ secrets.SHEET_ID }}
+          DASHBOARD_EDIT_TOKEN: ${{ secrets.DASHBOARD_EDIT_TOKEN }}
         run: python update_dashboard.py
       - name: Commit updated dashboard
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
+          git pull --rebase origin main
           git add index.html
           git commit -m "Auto-update dashboard" || echo "No changes to commit"
           git pull --rebase origin main

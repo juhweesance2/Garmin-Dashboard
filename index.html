@@ -215,6 +215,7 @@ footer .update-note b{ color:var(--text-muted); }
 .route-map .leaflet-control-zoom a:hover{ background:var(--bg-panel); }
 .route-map .leaflet-control-attribution{ background:rgba(13,16,19,0.72); color:var(--text-dim); }
 .route-map .leaflet-control-attribution a{ color:var(--text-muted); }
+.route-tile-warning{ display:flex; gap:8px; align-items:flex-start; margin-top:8px; padding:8px 10px; border-radius:6px; background:var(--bg-raised); border:1px solid var(--clay); color:var(--text-muted); font-size:12px; line-height:1.4; }
 .route-legend{ display:flex; gap:16px; margin-top:8px; font-size:11px; color:var(--text-muted); }
 .modal-splits-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
 .modal-splits-table th{ text-align:left; font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); }
@@ -2045,6 +2046,19 @@ function renderRouteMap(containerId, points, opts){
   container.innerHTML='';
   const latlngs=points.map(p=>[p[0],p[1]]);
   const map=L.map(container,{scrollWheelZoom:false});
+  // v16 hotfix: Leaflet's own documented guidance for a map created inside an
+  // element that was just made visible (exactly our case — the modal goes
+  // from display:none to display:flex moments before this runs) is to call
+  // invalidateSize() once before relying on the map's computed size for
+  // anything. A map's first getSize() call should measure the live DOM fresh
+  // regardless, so this may not be THE fix for the "t.min"/"reading 'min'"
+  // crash reported from production — I can't confirm that from here, since
+  // this sandbox has no path to real Leaflet or a real browser against the
+  // live site (every CDN/tile host and even the plain npm/pip registries are
+  // blocked by this environment's egress policy, confirmed while debugging
+  // this). It's cheap, harmless, and Leaflet's own recommended practice for
+  // this exact "map inside a modal" shape, so it stays in regardless.
+  try{ map.invalidateSize(); }catch(e){}
   // CARTO Voyager (a Google Maps–style basemap) when a key is configured; plain
   // OSM tiles otherwise, so the map still works out of the box before anyone
   // sets one up. The dark-console recolor filter below was built to force OSM's
@@ -2053,17 +2067,44 @@ function renderRouteMap(containerId, points, opts){
   // the OSM fallback (see the CSS: .route-map.osm-fallback).
   const cartoKey = DATA.meta.cartoApiKey;
   container.classList.toggle('osm-fallback', !cartoKey);
-  if(cartoKey){
-    L.tileLayer(`https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${cartoKey}`,{
-      maxZoom:20,
-      attribution:'&copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
-    }).addTo(map);
-  } else {
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-      maxZoom:19,
-      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
-    }).addTo(map);
-  }
+  const tileLayer = cartoKey
+    ? L.tileLayer(`https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${cartoKey}`,{
+        maxZoom:20,
+        attribution:'&copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+      })
+    : L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+        maxZoom:19,
+        attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+      });
+  tileLayer.addTo(map);
+  // v16 hotfix: until now, the ONLY "map isn't working" state this code could
+  // detect was `typeof L==='undefined'` — Leaflet's own script tag failing to
+  // load. But Leaflet loading fine and then every individual map TILE request
+  // failing (an ad blocker or privacy extension flagging tile.openstreetmap.org
+  // or the CARTO CDN, a captive portal, a corporate network blocking image
+  // CDNs) is at least as common in the field, and it left no visible trace at
+  // all — just a flat grey box with working-looking zoom controls, which reads
+  // as "broken" with nothing in the UI, console error, or this script's own
+  // try/catch to explain it (there's nothing to throw — Leaflet considers a
+  // failed tile request a normal, recoverable event, not an error condition).
+  // No mock Leaflet shim can surface this either, by construction: it never
+  // makes a real network request to fail in the first place. So this is
+  // detected the only way it can be: give the tile layer a few seconds to
+  // prove at least ONE tile loaded, and if every attempt so far has errored
+  // and none has succeeded, say so directly instead of leaving a silent blank
+  // box — this never fires for an ordinary slow connection, since it only
+  // triggers on actual errors, not merely the absence of a 'load' event yet.
+  let tilesLoaded = 0, tileErrors = 0;
+  tileLayer.on('tileload', () => { tilesLoaded++; });
+  tileLayer.on('tileerror', () => { tileErrors++; });
+  setTimeout(() => {
+    if(tilesLoaded === 0 && tileErrors > 0 && container.isConnected){
+      const warn = document.createElement('div');
+      warn.className = 'route-tile-warning';
+      warn.innerHTML = '⚠<div>Map tiles aren\'t loading — this is almost always an ad blocker, privacy extension, or network filter blocking the map image service, not a dashboard bug. The route data itself (splits, pace, elevation) below is unaffected.</div>';
+      container.insertAdjacentElement('afterend', warn);
+    }
+  }, 4000);
 
   // v15 — pace-colored route: split the polyline into one short segment per
   // pair of consecutive GPS points, colored by the pace of whichever mile
@@ -2144,21 +2185,40 @@ function renderRouteMap(containerId, points, opts){
   }
   L.circleMarker(latlngs[0],{radius:6,color:'#0E141C',weight:2,fillColor:'#2FD480',fillOpacity:1}).addTo(map).bindTooltip('Start');
   L.circleMarker(latlngs[latlngs.length-1],{radius:6,color:'#0E141C',weight:2,fillColor:'#FF5A64',fillOpacity:1}).addTo(map).bindTooltip('Finish');
-  // v15 hotfix: fit to bounds built directly from the latlngs array via
-  // L.latLngBounds() — Leaflet's standard, extremely well-trodden way to get a
-  // bounds object from a set of points. The previous approach (an invisible
-  // polyline created only so its own .getBounds() could be read, never added
-  // to the map) is valid per Leaflet's own source — a Polyline computes its
-  // bounds at construction time from the latlngs alone, independent of
-  // whether it's ever attached to the map — but it tripped something in real
-  // Leaflet's minified internals in production: "Route map failed to render —
-  // undefined is not an object (evaluating 't.min')", an error from inside
-  // Leaflet's own code, not ours. The fake Leaflet shim this was tested
-  // against never could have caught that, since it stubs getBounds() with a
-  // dummy object instead of doing real bounds math. This sidesteps whatever
-  // that was by using the one standard API for this instead of a homemade
-  // workaround.
-  map.fitBounds(L.latLngBounds(latlngs), {padding:[18,18]});
+  // v15 hotfix, UPDATE for v16: the v15 fix below (building bounds via
+  // L.latLngBounds() instead of an unattached polyline's own .getBounds())
+  // was written on the theory that the earlier approach was the problem. It
+  // shipped, and the exact same failure came back in production anyway —
+  // "Route map failed to render — Cannot read properties of undefined
+  // (reading 'min')" — meaning v15's theory of the cause was wrong, or
+  // incomplete, and this call can still throw from inside Leaflet's own
+  // internals for a reason not yet confirmed. No mock Leaflet can prove or
+  // disprove this either way, since it stubs the whole bounds/zoom
+  // calculation rather than running Leaflet's real math — and this sandbox
+  // has no path to the real library or a real browser to reproduce it
+  // directly (every CDN, and even the plain npm/pip package registries, are
+  // blocked by its egress policy). So: fitBounds is now wrapped. If it throws
+  // again, instead of losing the whole map, fall back to manually centering
+  // and zooming from the raw lat/lng values ourselves — a looser frame than a
+  // perfectly tight fitBounds, but a working map beats an error message.
+  try{
+    map.fitBounds(L.latLngBounds(latlngs), {padding:[18,18]});
+  }catch(boundsErr){
+    console.error('fitBounds failed, falling back to a manual center/zoom:', boundsErr);
+    let minLat=Infinity,maxLat=-Infinity,minLon=Infinity,maxLon=-Infinity,sumLat=0,sumLon=0;
+    latlngs.forEach(([lat,lon])=>{
+      sumLat+=lat; sumLon+=lon;
+      if(lat<minLat)minLat=lat; if(lat>maxLat)maxLat=lat;
+      if(lon<minLon)minLon=lon; if(lon>maxLon)maxLon=lon;
+    });
+    const centerLat=sumLat/latlngs.length, centerLon=sumLon/latlngs.length;
+    const spanDeg=Math.max(maxLat-minLat, maxLon-minLon, 0.0008);
+    // Rough degree-span -> zoom mapping (each zoom level roughly halves the
+    // visible span); clamped to a sane range rather than trusting the formula
+    // at the extremes.
+    const zoom=Math.max(3, Math.min(17, Math.round(14 - Math.log2(spanDeg/0.01))));
+    map.setView([centerLat, centerLon], zoom);
+  }
 
   // The map side of the sync: a hover dot driven by the SPLITS chart (see
   // SPLITS_SYNC_TARGETS doc comment), positioned at the route point nearest

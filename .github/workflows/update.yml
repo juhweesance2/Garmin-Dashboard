@@ -21,6 +21,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Pull in any browser-saved edits
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          # v16: checkboxes/notes/drag-and-drop swaps commit straight to
+          # manual_data.json via the GitHub API, independently of this
+          # workflow — pull that in BEFORE the script below writes anything,
+          # while the tree is still clean. A pull --rebase refuses to run once
+          # there are local uncommitted changes, which the script is about to
+          # create (that's the exact "cannot pull with rebase: you have
+          # unstaged changes" error from before — it happened because this
+          # pull used to run after the script, against a dirty tree). Doing it
+          # here also means today's build of index.html already reflects any
+          # edit saved since the last sync, instead of waiting for the next one.
+          git pull --rebase origin main
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -37,10 +52,12 @@ jobs:
         run: python update_dashboard.py
       - name: Commit updated dashboard
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git pull --rebase origin main
           git add index.html
           git commit -m "Auto-update dashboard" || echo "No changes to commit"
+          # A second pull --rebase here is safe now (index.html is already
+          # committed, so the tree is clean again) — it catches anything that
+          # landed on origin while the script above was busy calling the
+          # Garmin and Google Sheets APIs, and replays this commit on top of
+          # it instead of letting the push get rejected or racing it.
           git pull --rebase origin main
           git push

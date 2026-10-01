@@ -27,6 +27,25 @@ CARTO_API_KEY = os.environ.get("CARTO_API_KEY", "")  # optional, see setup guide
                                                         # 5M requests/month), but worth knowing if your repo
                                                         # is public.
 
+DASHBOARD_EDIT_TOKEN = os.environ.get("DASHBOARD_EDIT_TOKEN", "")  # optional, new in v16 — a fine-grained
+                                                        # GitHub token, scoped to ONLY this repo with
+                                                        # Contents: Read-and-write and nothing else, that lets
+                                                        # the dashboard's own JavaScript commit edits (checked-
+                                                        # off workouts, day notes, drag-and-drop reschedules)
+                                                        # straight into manual_data.json in this repo. Same
+                                                        # client-side-visible-in-page-source trade-off as the
+                                                        # CARTO key above, but with higher stakes since it's a
+                                                        # write credential, not a read-only maps key — see the
+                                                        # v16 setup guide section for the exact scoping steps.
+                                                        # When this is empty, the edit controls still render but
+                                                        # show "editing isn't set up yet" instead of saving.
+
+MANUAL_DATA_PATH = "manual_data.json"  # v16 — the small hand-edited-from-the-browser data file this script
+                                        # reads back in on every sync: manually-checked-off non-Garmin
+                                        # workouts, day notes, and drag-and-drop schedule swaps. Written
+                                        # directly by the dashboard's own JS via the GitHub API, not by this
+                                        # script — this script only ever reads it.
+
 RACE_DATE = date(2026, 11, 8)
 RACE_NAME = "Monterey Bay Half Marathon"
 # v15 — revised Sep 29, 2026. The original sub-2:14 goal assumed a training
@@ -332,6 +351,33 @@ def build_load_mix(runs_asc, today, window_days=28):
 # raceDayActualMi fields) — just not in the weekly mileage total.
 # =====================================================================
 DAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+# =====================================================================
+# v16 — manual_data.json: the hand-edited layer written directly by the
+# dashboard's own JS (via the GitHub Contents API — see the v16 setup guide
+# section and the GitHubStore JS module). This script only ever reads it, on
+# every sync, so a browser edit (a checked-off strength session, a day note,
+# a drag-and-drop swap) made at any point survives the next nightly rebuild
+# instead of being silently overwritten. A missing or malformed file is
+# treated as "nothing edited yet" rather than a sync failure — this file not
+# existing is the normal, expected state until the first edit is ever made.
+# =====================================================================
+def load_manual_data():
+    default = {"scheduleOverrides": {}, "manualLogs": {}, "notes": {}}
+    try:
+        with open(MANUAL_DATA_PATH, "r") as f:
+            raw = json.load(f)
+    except FileNotFoundError:
+        return default
+    except Exception:
+        return default
+    if not isinstance(raw, dict):
+        return default
+    return {
+        "scheduleOverrides": raw.get("scheduleOverrides") if isinstance(raw.get("scheduleOverrides"), dict) else {},
+        "manualLogs": raw.get("manualLogs") if isinstance(raw.get("manualLogs"), dict) else {},
+        "notes": raw.get("notes") if isinstance(raw.get("notes"), dict) else {},
+    }
 
 def build_plan_comparison(runs_asc, today):
     out = []
@@ -1223,6 +1269,7 @@ def main():
 
     today = datetime.now().date()
     start_history = today - timedelta(days=HISTORY_DAYS)
+    manual_data = load_manual_data()  # v16 — checked-off workouts, notes, schedule swaps from the browser
 
     # ---- Runs ----
     raw_activities = safe_method_call(
@@ -1441,6 +1488,7 @@ def main():
             "syncRangeEnd": today.isoformat(),
             "detailRunCount": DETAIL_RUN_COUNT,
             "cartoApiKey": CARTO_API_KEY,
+            "githubWriteToken": DASHBOARD_EDIT_TOKEN,
             "goalLabel": GOAL_REASSESSMENT["revisedGoalLabel"],
             "goalPaceLabel": GOAL_REASSESSMENT["revisedPaceLabel"],
             "priorGoalLabel": GOAL_REASSESSMENT["priorGoal"],
@@ -1454,6 +1502,14 @@ def main():
         "longRuns": long_runs_data,
         "runDetails": run_details,
         "planComparison": plan_comparison,
+        # v16 — the raw, un-swapped plan (exactly as TRAINING_PLAN defines it) plus whatever's been
+        # hand-edited from the browser. The client recomputes each day's trackable/done/missed status
+        # live from these (same algorithm as build_plan_comparison above, kept in JS so a same-session
+        # edit shows immediately without waiting for tomorrow's sync) — planComparison's own per-day
+        # sessions above are left exactly as before (pre-v16) and are NOT consulted for this panel.
+        "rawTrainingPlan": [{"phase": wk["phase"], "sessions": wk["sessions"]} for wk in TRAINING_PLAN],
+        "trackableTypes": sorted(TRACKABLE_TYPES),
+        "manualData": manual_data,
         "efficiencyTrend": efficiency_trend,
         "vo2max": vo2_series,
         "vo2maxToday": vo2max_today,
@@ -1535,41 +1591,14 @@ HTML_SHELL = r"""<!DOCTYPE html>
   <section id="nav-today">
     <div class="section-head">
       <div class="section-title">This Week's Plan</div>
-      <div class="section-note">Every day of the current training week, matched against what Garmin actually recorded.</div>
+      <div class="section-note">Every day of the current training week, matched against what Garmin actually recorded. Drag a day card onto another to swap sessions, tap a card for instructions and notes.</div>
     </div>
     <div class="panel" id="this-week-panel"></div>
   </section>
 
   <section id="nav-training">
     <div class="section-head">
-      <div class="section-title"><span class="section-index">01</span> Weekly Volume &amp; Training Load</div>
-      <div class="section-note">Mileage by week against your long run distance and weekly run count.</div>
-    </div>
-    <div class="panel">
-      <div class="chart-box tall"><div id="chart-volume" class="svg-chart"></div></div>
-      <div class="legend-row">
-        <div class="legend-item"><span class="legend-swatch" style="background:var(--amber)"></span>Weekly miles</div>
-        <div class="legend-item"><span class="legend-swatch" style="background:var(--blue)"></span>Long run distance</div>
-        <div class="legend-item"><span class="legend-swatch" style="background:var(--teal); border-radius:50%;"></span>Runs per week</div>
-        <div class="legend-item">★ Peak week, all-time</div>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="section-head">
-      <div class="section-title"><span class="section-index">02</span> Pace Progression</div>
-      <div class="section-note">Every run's average pace, colored by workout type, with a 5-run rolling average.</div>
-    </div>
-    <div class="panel">
-      <div class="chart-box tall"><div id="chart-pace" class="svg-chart"></div></div>
-      <div class="legend-row" id="pace-legend"></div>
-    </div>
-  </section>
-
-  <section>
-    <div class="section-head">
-      <div class="section-title"><span class="section-index">03</span> Plan vs. Actual</div>
+      <div class="section-title"><span class="section-index">01</span> Plan vs. Actual</div>
       <div class="section-note" id="plan-note">Weekly mileage against your training plan.</div>
     </div>
     <div class="panel">
@@ -1594,6 +1623,33 @@ HTML_SHELL = r"""<!DOCTYPE html>
         </table>
       </div>
       </details>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div class="section-title"><span class="section-index">02</span> Weekly Volume &amp; Training Load</div>
+      <div class="section-note">Mileage by week against your long run distance and weekly run count.</div>
+    </div>
+    <div class="panel">
+      <div class="chart-box tall"><div id="chart-volume" class="svg-chart"></div></div>
+      <div class="legend-row">
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--amber)"></span>Weekly miles</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--blue)"></span>Long run distance</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:var(--teal); border-radius:50%;"></span>Runs per week</div>
+        <div class="legend-item">★ Peak week, all-time</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div class="section-title"><span class="section-index">03</span> Pace Progression</div>
+      <div class="section-note">Every run's average pace, colored by workout type, with a 5-run rolling average.</div>
+    </div>
+    <div class="panel">
+      <div class="chart-box tall"><div id="chart-pace" class="svg-chart"></div></div>
+      <div class="legend-row" id="pace-legend"></div>
     </div>
   </section>
 
@@ -1731,6 +1787,12 @@ HTML_SHELL = r"""<!DOCTYPE html>
     </div>
     <div class="modal-ministrip" id="modal-ministrip"></div>
     <div id="modal-body"></div>
+  </div>
+</div>
+<div id="day-modal" class="modal-overlay" style="display:none;">
+  <div class="modal-panel day-modal-panel">
+    <button class="modal-close" id="day-modal-close" aria-label="Close">&times;</button>
+    <div id="day-modal-body"></div>
   </div>
 </div>
 <div id="chart-zoom-modal" class="modal-overlay chart-zoom-overlay" style="display:none;">
@@ -1994,7 +2056,7 @@ footer .update-note b{ color:var(--text-muted); }
 .week-recap b{ color:var(--text); font-family:var(--font-mono); }
 .week-days{ display:grid; grid-template-columns:repeat(7,1fr); gap:8px; }
 @media (max-width:760px){ .week-days{ grid-template-columns:repeat(2,1fr); } }
-.week-day-card{ border:1px solid var(--border); border-radius:6px; padding:10px 10px 11px; background:var(--bg-raised); display:flex; flex-direction:column; gap:5px; min-height:112px; position:relative; }
+.week-day-card{ border:1px solid var(--border); border-radius:6px; padding:10px 10px 11px; background:var(--bg-raised); display:flex; flex-direction:column; gap:5px; min-height:112px; position:relative; cursor:pointer; touch-action:pan-y; user-select:none; transition:border-color .12s, box-shadow .12s, opacity .12s; }
 .week-day-card.is-today{ border-color:var(--amber); box-shadow:0 0 0 1px var(--amber) inset; }
 .week-day-card .wd-name{ font-family:var(--font-mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-dim); display:flex; justify-content:space-between; align-items:center; }
 .week-day-card .wd-today-chip{ font-family:var(--font-mono); font-size:8.5px; background:var(--amber); color:#fff; padding:1px 5px; border-radius:20px; letter-spacing:0.04em; }
@@ -2003,6 +2065,37 @@ footer .update-note b{ color:var(--text-muted); }
 .week-day-card .wd-sub{ font-size:10.5px; color:var(--text-muted); line-height:1.3; margin-top:auto; }
 .week-day-card.status-done{ opacity:0.72; }
 .week-day-card .wd-status-icon{ position:absolute; top:8px; right:8px; font-size:11px; }
+.week-day-card .wd-note-dot{ position:absolute; top:9px; right:26px; font-size:10px; color:var(--amber); }
+.week-day-card .wd-swapped-tag{ font-size:9px; color:var(--text-dim); font-family:var(--font-mono); }
+.week-day-card .wd-check-row{ display:flex; align-items:center; gap:6px; font-size:10px; font-family:var(--font-mono); color:var(--text-muted); margin-top:2px; }
+.week-day-card .wd-check-row input{ width:13px; height:13px; accent-color:var(--amber); cursor:pointer; }
+.week-day-card.drag-dragging{ opacity:0.35; }
+.week-day-card.drag-over{ border-color:var(--amber); box-shadow:0 0 0 2px var(--amber) inset; }
+.drag-ghost{ position:fixed; z-index:2000; pointer-events:none; padding:8px 12px; border-radius:6px; background:var(--bg-raised); border:1px solid var(--amber); box-shadow:0 8px 24px rgba(0,0,0,0.4); font-size:11px; font-family:var(--font-display); font-weight:700; color:var(--text); opacity:0.92; transform:translate(-50%,-140%); }
+
+.week-nav-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+.week-nav-btn{ background:var(--bg-raised); border:1px solid var(--border); color:var(--text-muted); font-family:var(--font-mono); font-size:11px; padding:6px 11px; border-radius:6px; cursor:pointer; }
+.week-nav-btn:hover:not(:disabled){ color:var(--text); border-color:var(--text-dim); }
+.week-nav-btn:disabled{ opacity:0.35; cursor:default; }
+.week-nav-label{ font-family:var(--font-mono); font-size:11.5px; color:var(--text-dim); text-align:center; flex:1; min-width:140px; }
+.week-nav-jump{ font-family:var(--font-mono); font-size:10.5px; color:var(--amber); background:none; border:none; cursor:pointer; text-decoration:underline; padding:0; }
+.week-save-status{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); display:flex; align-items:center; gap:5px; }
+.week-save-status.is-saving{ color:var(--amber); }
+.week-save-status.is-error{ color:var(--clay); cursor:pointer; text-decoration:underline; }
+.week-reset-link{ font-family:var(--font-mono); font-size:10px; color:var(--text-dim); background:none; border:none; text-decoration:underline; cursor:pointer; padding:0; margin-top:6px; align-self:flex-start; }
+
+.day-modal-panel{ max-width:480px; }
+.day-modal-type{ display:inline-block; font-family:var(--font-display); font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:0.02em; padding:3px 9px; border-radius:4px; color:#fff; margin-bottom:10px; }
+.day-modal-title{ font-family:var(--font-display); font-weight:700; font-size:18px; margin-bottom:4px; text-wrap:balance; }
+.day-modal-date{ font-family:var(--font-mono); font-size:11.5px; color:var(--text-dim); margin-bottom:16px; }
+.day-modal-detail{ font-size:13px; line-height:1.5; color:var(--text-muted); background:var(--bg-inset); border:1px solid var(--border-soft); border-radius:6px; padding:12px 14px; margin-bottom:16px; }
+.day-modal-actual{ font-size:12.5px; margin-bottom:16px; }
+.day-modal-swap-row{ display:flex; align-items:center; gap:8px; margin-bottom:16px; font-size:11.5px; }
+.day-modal-swap-row select{ background:var(--bg-raised); border:1px solid var(--border); color:var(--text); font-family:var(--font-mono); font-size:11.5px; padding:5px 8px; border-radius:5px; }
+.day-modal-notes textarea{ width:100%; min-height:90px; background:var(--bg-inset); border:1px solid var(--border-soft); border-radius:6px; color:var(--text); font-family:var(--font-body); font-size:13px; padding:10px 12px; resize:vertical; }
+.day-modal-notes-footer{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:8px; }
+.day-modal-save-btn{ background:var(--amber); color:#1a1200; border:none; font-family:var(--font-display); font-weight:700; font-size:11.5px; padding:7px 16px; border-radius:6px; cursor:pointer; }
+.day-modal-save-btn:disabled{ opacity:0.5; cursor:default; }
 .plan-table-wrap .section-note-inline{ font-size:12px; color:var(--text-dim); margin-bottom:10px; }
 details.plan-expand{ margin-top:14px; }
 details.plan-expand > summary{ cursor:pointer; font-family:var(--font-mono); font-size:12px; color:var(--text-muted); padding:6px 0; list-style:none; }
@@ -2749,6 +2842,435 @@ let SPLITS_SYNC_TARGETS = {};
 // (who have no real hover) get a point that sticks after a tap. Clicking the
 // SAME already-pinned point again un-pins it.
 let SYNC_PINNED = {};
+
+// =====================================================================
+// v16 — This Week's Plan: week browsing, manual completion, notes, and
+// drag-and-drop day swaps, all persisted back to GitHub via GitHubStore
+// below. The day-level status/matching logic in computeWeekView()
+// deliberately duplicates Python's build_plan_comparison day-status
+// algorithm rather than reusing DATA.planComparison's own per-day
+// `sessions` field — this is now the one place responsible for what's
+// displayed, so a same-session edit (a checkbox, a swap) shows instantly
+// without waiting for tomorrow's sync, and there's no second copy of the
+// logic to drift out of sync with this one. The WEEK-LEVEL fields
+// (plannedMi/actualMi/adherencePct/status) are untouched by any of this —
+// overrides only change which workout displays on which day, never the
+// mileage math, so they're read straight from DATA.planComparison as-is.
+// =====================================================================
+let MANUAL_DATA = DATA.manualData || {};
+if(!MANUAL_DATA.scheduleOverrides) MANUAL_DATA.scheduleOverrides = {};
+if(!MANUAL_DATA.manualLogs) MANUAL_DATA.manualLogs = {};
+if(!MANUAL_DATA.notes) MANUAL_DATA.notes = {};
+const TRACKABLE_TYPES_JS = new Set(DATA.trackableTypes || ['Intervals','Tempo','Long Run','Easy','Race']);
+let WEEK_VIEW_IDX = null;
+let _ALL_RUNS_CACHE = null;
+function allRunsAsc(){
+  if(!_ALL_RUNS_CACHE) _ALL_RUNS_CACHE = [...DATA.runs].sort((a,b)=> a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  return _ALL_RUNS_CACHE;
+}
+function isoAddDays(iso, n){
+  const d = new Date(iso+'T12:00:00');
+  d.setDate(d.getDate()+n);
+  return d.toISOString().slice(0,10);
+}
+function daysBetweenIso(a, b){
+  return Math.round((new Date(b+'T12:00:00') - new Date(a+'T12:00:00'))/86400000);
+}
+
+function computeWeekView(weekIdx){
+  const meta = (DATA.planComparison||[])[weekIdx];
+  const raw = (DATA.rawTrainingPlan||[])[weekIdx];
+  if(!meta || !raw) return null;
+  const weekStartIso = meta.weekStart;
+  const overrides = MANUAL_DATA.scheduleOverrides[weekStartIso] || {};
+  const todayIso = DATA.meta.lastSynced;
+  const runs = allRunsAsc();
+  const sessions = {};
+  DAY_ORDER.forEach((dk, offset) => {
+    const sourceKey = overrides[dk] || dk;
+    const planned = raw.sessions[sourceKey];
+    if(!planned) return;
+    const targetDate = isoAddDays(weekStartIso, offset);
+    const trackable = TRACKABLE_TYPES_JS.has(planned.type);
+    const dayIsFuture = targetDate > todayIso;
+    let match = null;
+    if(trackable && !dayIsFuture){
+      const candidates = runs.filter(r => Math.abs(daysBetweenIso(r.date, targetDate)) <= 1);
+      if(candidates.length){
+        match = candidates.reduce((best,r)=> Math.abs(daysBetweenIso(r.date,targetDate)) < Math.abs(daysBetweenIso(best.date,targetDate)) ? r : best);
+      }
+    }
+    let dayStatus = !trackable ? 'not-tracked' : (dayIsFuture ? 'upcoming' : (match ? 'done' : 'missed'));
+    const manualEntry = MANUAL_DATA.manualLogs[targetDate];
+    const manualDone = !!(manualEntry && manualEntry.done);
+    if(manualDone && !dayIsFuture) dayStatus = 'done';
+    sessions[dk] = {
+      type: planned.type, title: planned.title, detail: planned.detail, targetMi: planned.targetMi,
+      date: targetDate, trackable, dayStatus, dayIsFuture,
+      actualMi: match ? Math.round(match.distMi*100)/100 : null,
+      actualPace: match ? match.paceMinMi : null,
+      matched: !!match, manualDone,
+      note: MANUAL_DATA.notes[targetDate] || '',
+      swapped: sourceKey !== dk, sourceKey,
+    };
+  });
+  return { weekIdx, weekStartIso, weekEnd: meta.weekEnd, phase: meta.phase, plannedMi: meta.plannedMi,
+    actualMi: meta.actualMi, adherencePct: meta.adherencePct, raceDayMi: meta.raceDayMi, sessions };
+}
+
+function swapDays(weekIdx, dayA, dayB){
+  const meta = (DATA.planComparison||[])[weekIdx];
+  if(!meta || dayA===dayB) return;
+  const weekStartIso = meta.weekStart;
+  const overrides = MANUAL_DATA.scheduleOverrides[weekStartIso] || {};
+  const currentA = overrides[dayA] || dayA;
+  const currentB = overrides[dayB] || dayB;
+  const next = {...overrides};
+  if(currentB === dayA) delete next[dayA]; else next[dayA] = currentB;
+  if(currentA === dayB) delete next[dayB]; else next[dayB] = currentA;
+  Object.keys(next).forEach(k=>{ if(next[k]===k) delete next[k]; });
+  if(Object.keys(next).length) MANUAL_DATA.scheduleOverrides[weekStartIso] = next;
+  else delete MANUAL_DATA.scheduleOverrides[weekStartIso];
+  renderThisWeekPanel();
+  GitHubStore.save(d=>{
+    d.scheduleOverrides = d.scheduleOverrides || {};
+    if(Object.keys(next).length) d.scheduleOverrides[weekStartIso] = next;
+    else delete d.scheduleOverrides[weekStartIso];
+    return d;
+  }, `Swap ${dayA} and ${dayB} for week of ${weekStartIso}`).catch(()=>{});
+}
+
+function resetWeekSchedule(weekStartIso){
+  delete MANUAL_DATA.scheduleOverrides[weekStartIso];
+  renderThisWeekPanel();
+  GitHubStore.save(d=>{ d.scheduleOverrides = d.scheduleOverrides||{}; delete d.scheduleOverrides[weekStartIso]; return d; }, `Reset schedule for week of ${weekStartIso}`).catch(()=>{});
+}
+
+// ---- GitHub write-back (v16) — see the setup guide's v16 section. Repo
+// owner/name are read from the page's own URL (the standard
+// https://OWNER.github.io/REPO/ GitHub Pages shape) rather than hardcoded,
+// so there's nothing to configure beyond the token itself. ----
+const GitHubStore = (function(){
+  const FILE_PATH = 'manual_data.json';
+  let cachedSha = null;
+  let queue = Promise.resolve();
+
+  function ownerRepo(){
+    const host = location.hostname;
+    const owner = host.endsWith('.github.io') ? host.slice(0, -('.github.io'.length)) : host;
+    const seg = (location.pathname.split('/').filter(Boolean))[0];
+    const repo = seg || (owner + '.github.io');
+    return {owner, repo};
+  }
+  function token(){ return (DATA.meta && DATA.meta.githubWriteToken) || ''; }
+  function apiUrl(){ const {owner,repo} = ownerRepo(); return `https://api.github.com/repos/${owner}/${repo}/contents/${FILE_PATH}`; }
+  function b64encode(str){ return btoa(unescape(encodeURIComponent(str))); }
+  function b64decode(str){ return decodeURIComponent(escape(atob(str.replace(/\n/g,'')))); }
+
+  async function readCurrent(){
+    const res = await fetch(apiUrl(), { headers: { 'Authorization': `Bearer ${token()}`, 'Accept':'application/vnd.github+json' } });
+    if(res.status === 404){ cachedSha = null; return {scheduleOverrides:{}, manualLogs:{}, notes:{}}; }
+    if(!res.ok) throw new Error('GitHub read failed: '+res.status);
+    const body = await res.json();
+    cachedSha = body.sha;
+    try{
+      const parsed = JSON.parse(b64decode(body.content));
+      return { scheduleOverrides: parsed.scheduleOverrides||{}, manualLogs: parsed.manualLogs||{}, notes: parsed.notes||{} };
+    }catch(e){ return {scheduleOverrides:{}, manualLogs:{}, notes:{}}; }
+  }
+
+  async function writeOnce(mutate, message){
+    const current = await readCurrent();
+    const next = mutate(JSON.parse(JSON.stringify(current)));
+    const payload = { message, content: b64encode(JSON.stringify(next, null, 2)) };
+    if(cachedSha) payload.sha = cachedSha;
+    const res = await fetch(apiUrl(), {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${token()}`, 'Accept':'application/vnd.github+json', 'Content-Type':'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if(res.status === 409 || res.status === 422){ const e = new Error('conflict'); e.retry = true; throw e; }
+    if(!res.ok){ const e = new Error('GitHub write failed: '+res.status); throw e; }
+    const body = await res.json();
+    cachedSha = body.content && body.content.sha;
+  }
+
+  async function doSave(mutate, message){
+    setSaveStatus('saving');
+    let attempt = 0, lastErr = null;
+    while(attempt < 3){
+      try{ await writeOnce(mutate, message); setSaveStatus('saved'); return true; }
+      catch(e){ lastErr = e; attempt++; if(!(e && e.retry) || attempt >= 3) break; }
+    }
+    setSaveStatus('error');
+    _lastFailedSave = {mutate, message};
+    throw lastErr;
+  }
+
+  function save(mutate, message){
+    if(!token()){ setSaveStatus('no-token'); return Promise.reject(new Error('no token configured')); }
+    queue = queue.then(() => doSave(mutate, message), () => doSave(mutate, message));
+    return queue;
+  }
+
+  return { save, ownerRepo };
+})();
+
+let _lastFailedSave = null;
+let _saveStatusTimer = null;
+function setSaveStatus(state){
+  const el = document.getElementById('week-save-status');
+  if(!el) return;
+  el.classList.remove('is-saving','is-error');
+  clearTimeout(_saveStatusTimer);
+  if(state==='saving'){ el.textContent = 'Saving…'; el.classList.add('is-saving'); }
+  else if(state==='saved'){ el.textContent = 'All changes saved'; _saveStatusTimer = setTimeout(()=>{ if(el.textContent==='All changes saved') el.textContent=''; }, 4000); }
+  else if(state==='error'){ el.textContent = "Couldn't save — tap to retry"; el.classList.add('is-error'); }
+  else if(state==='no-token'){ el.textContent = 'Editing not set up — see setup guide'; }
+}
+
+function wireDayCardDrag(panel, weekIdx, view){
+  let dragState = null;
+  let ghostEl = null;
+  let overTarget = null;
+
+  function cleanup(){
+    if(dragState && dragState.longPressTimer) clearTimeout(dragState.longPressTimer);
+    if(dragState) dragState.card.classList.remove('drag-dragging');
+    if(overTarget) overTarget.classList.remove('drag-over');
+    if(ghostEl){ ghostEl.remove(); ghostEl = null; }
+    overTarget = null;
+    dragState = null;
+  }
+  function moveGhost(x,y){ if(ghostEl){ ghostEl.style.left = x+'px'; ghostEl.style.top = y+'px'; } }
+  function startDrag(card, dayKey, x, y){
+    dragState.dragging = true;
+    card.classList.add('drag-dragging');
+    const s = view.sessions[dayKey];
+    ghostEl = document.createElement('div');
+    ghostEl.className = 'drag-ghost';
+    ghostEl.textContent = s ? s.title : DAY_NAMES[dayKey];
+    document.body.appendChild(ghostEl);
+    moveGhost(x, y);
+  }
+
+  panel.querySelectorAll('.week-day-card').forEach(card=>{
+    const dayKey = card.getAttribute('data-day-key');
+    card.addEventListener('pointerdown', (e)=>{
+      if(e.target.closest('.wd-check-row')) return;
+      if(e.pointerType === 'mouse' && e.button !== 0) return;
+      cleanup();
+      // Capture the pointer on this specific card so pointermove/pointerup keep
+      // targeting it even once the cursor/finger moves over a different card —
+      // without this, each card's own listener only sees events while the
+      // pointer is still physically inside its bounding box, which breaks
+      // dragging the instant you cross into a neighboring card.
+      try{ card.setPointerCapture(e.pointerId); }catch(err){}
+      dragState = { card, dayKey, startX:e.clientX, startY:e.clientY, lastX:e.clientX, lastY:e.clientY, dragging:false, pointerType:e.pointerType };
+      if(e.pointerType !== 'mouse'){
+        dragState.longPressTimer = setTimeout(()=>{
+          if(dragState && dragState.card===card && !dragState.dragging){
+            const dx = Math.abs(dragState.lastX - dragState.startX), dy = Math.abs(dragState.lastY - dragState.startY);
+            if(dx < 10 && dy < 10) startDrag(card, dayKey, dragState.lastX, dragState.lastY);
+          }
+        }, 420);
+      }
+    });
+    card.addEventListener('pointermove', (e)=>{
+      if(!dragState || dragState.card !== card) return;
+      dragState.lastX = e.clientX; dragState.lastY = e.clientY;
+      if(!dragState.dragging){
+        if(dragState.pointerType === 'mouse'){
+          const dx = Math.abs(e.clientX - dragState.startX), dy = Math.abs(e.clientY - dragState.startY);
+          if(dx > 6 || dy > 6) startDrag(card, dragState.dayKey, e.clientX, e.clientY);
+        }
+        return;
+      }
+      e.preventDefault();
+      moveGhost(e.clientX, e.clientY);
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const targetCard = el ? el.closest('.week-day-card') : null;
+      if(overTarget && overTarget !== targetCard){ overTarget.classList.remove('drag-over'); overTarget = null; }
+      if(targetCard && targetCard !== dragState.card && panel.contains(targetCard)){ targetCard.classList.add('drag-over'); overTarget = targetCard; }
+    }, {passive:false});
+    const finish = ()=>{
+      if(!dragState || dragState.card !== card) return;
+      if(dragState.dragging && overTarget){
+        const targetKey = overTarget.getAttribute('data-day-key');
+        card.dataset.justDragged = '1';
+        swapDays(weekIdx, dayKey, targetKey);
+      }
+      cleanup();
+    };
+    card.addEventListener('pointerup', finish);
+    card.addEventListener('pointercancel', cleanup);
+  });
+}
+
+function openDayModal(weekIdx, dayKey){
+  const view = computeWeekView(weekIdx);
+  if(!view) return;
+  const s = view.sessions[dayKey];
+  if(!s) return;
+  const body = document.getElementById('day-modal-body');
+  let actualHtml = '';
+  if(s.trackable && s.dayStatus==='done' && s.actualMi!=null){
+    actualHtml = `<div class="day-modal-actual">Actual: <b>${s.actualMi.toFixed(2)}mi</b>${s.actualPace?` @ ${paceStr(s.actualPace)}/mi`:''}</div>`;
+  } else if(s.manualDone){
+    actualHtml = `<div class="day-modal-actual" style="color:var(--amber)">Marked done manually.</div>`;
+  } else if(s.dayStatus==='missed'){
+    actualHtml = `<div class="day-modal-actual" style="color:var(--clay)">No matching Garmin activity found within a day of this date.</div>`;
+  }
+  const swapOptions = DAY_ORDER.filter(d=>d!==dayKey).map(d=>{
+    const other = view.sessions[d];
+    return `<option value="${d}">${DAY_NAMES[d]} — ${other?other.title:'—'}</option>`;
+  }).join('');
+  const showCheckbox = !s.dayIsFuture && s.type !== 'Race' && (s.dayStatus!=='upcoming');
+
+  body.innerHTML = `
+    <span class="day-modal-type" style="background:${planTypeColor(s.type)}">${s.type}</span>
+    <div class="day-modal-title">${s.title}</div>
+    <div class="day-modal-date">${DAY_NAMES[dayKey]} &middot; ${fmtDate(s.date)}${s.swapped?' &middot; swapped from the original plan':''}</div>
+    ${actualHtml}
+    <div class="day-modal-detail">${s.detail}</div>
+    ${showCheckbox?`<label class="wd-check-row" style="margin-bottom:16px;"><input type="checkbox" id="day-modal-check" ${s.manualDone?'checked':''}> Mark this day done</label>`:''}
+    <div class="day-modal-swap-row">
+      <span>Swap with:</span>
+      <select id="day-modal-swap-select"><option value="">Choose a day…</option>${swapOptions}</select>
+    </div>
+    <div class="day-modal-notes">
+      <div class="modal-section-title" style="margin-top:0;">Notes</div>
+      <textarea id="day-modal-notes-text" placeholder="Anything worth remembering about this session…">${s.note}</textarea>
+      <div class="day-modal-notes-footer">
+        <span class="week-save-status" id="day-modal-save-status"></span>
+        <button type="button" class="day-modal-save-btn" id="day-modal-save-btn">Save note</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('day-modal').style.display = 'flex';
+
+  const checkEl = document.getElementById('day-modal-check');
+  if(checkEl) checkEl.addEventListener('change', (e)=>{
+    const checked = e.target.checked;
+    MANUAL_DATA.manualLogs[s.date] = MANUAL_DATA.manualLogs[s.date] || {};
+    MANUAL_DATA.manualLogs[s.date].done = checked;
+    renderThisWeekPanel();
+    openDayModal(weekIdx, dayKey); // refresh the modal's own "actual" text/status to match
+    GitHubStore.save(d=>{ d.manualLogs = d.manualLogs||{}; d.manualLogs[s.date] = d.manualLogs[s.date]||{}; d.manualLogs[s.date].done = checked; return d; }, `Mark ${s.date} ${checked?'done':'not done'}`).catch(()=>{});
+  });
+  document.getElementById('day-modal-swap-select').addEventListener('change', (e)=>{
+    const otherKey = e.target.value;
+    if(!otherKey) return;
+    swapDays(weekIdx, dayKey, otherKey);
+    closeDayModal();
+  });
+  const saveBtn = document.getElementById('day-modal-save-btn');
+  const statusEl = document.getElementById('day-modal-save-status');
+  saveBtn.addEventListener('click', ()=>{
+    const text = document.getElementById('day-modal-notes-text').value;
+    MANUAL_DATA.notes[s.date] = text;
+    saveBtn.disabled = true;
+    statusEl.textContent = 'Saving…'; statusEl.classList.remove('is-error'); statusEl.classList.add('is-saving');
+    GitHubStore.save(d=>{ d.notes = d.notes||{}; d.notes[s.date] = text; return d; }, `Update note for ${s.date}`)
+      .then(()=>{ statusEl.textContent='Saved ✓'; statusEl.classList.remove('is-saving'); saveBtn.disabled=false; renderThisWeekPanel(); })
+      .catch(()=>{ statusEl.textContent="Couldn't save — try again"; statusEl.classList.remove('is-saving'); statusEl.classList.add('is-error'); saveBtn.disabled=false; });
+  });
+}
+function closeDayModal(){ const m = document.getElementById('day-modal'); if(m) m.style.display='none'; }
+
+function renderThisWeekPanel(){
+  const plan = DATA.planComparison || [];
+  const panel = document.getElementById('this-week-panel');
+  if(!panel) return;
+  if(!plan.length){ panel.innerHTML = "<p class='empty'>No training plan configured.</p>"; return; }
+  const todayIso = DATA.meta.lastSynced;
+  const currentIdx = plan.findIndex(w => w.weekStart <= todayIso && todayIso <= w.weekEnd);
+  const idx = Math.max(0, Math.min(WEEK_VIEW_IDX==null ? (currentIdx===-1?0:currentIdx) : WEEK_VIEW_IDX, plan.length-1));
+  WEEK_VIEW_IDX = idx;
+  const view = computeWeekView(idx);
+  if(!view){ panel.innerHTML = "<p class='empty'>No active plan week right now — see the full plan below.</p>"; return; }
+  const prevWeekMeta = idx>0 ? plan[idx-1] : null;
+  const isCurrent = idx === currentIdx;
+
+  const recapBits = [`<span>Week ${idx+1} of ${plan.length} &middot; <b>${view.phase}</b></span>`];
+  if(view.adherencePct!=null) recapBits.push(`<span>${view.adherencePct}% of weekly target${isCurrent?' so far':''} (<b>${(view.actualMi||0).toFixed(1)}</b> / ${view.plannedMi.toFixed(1)}mi)</span>`);
+  else recapBits.push(`<span>${currentIdx!==-1 && idx > currentIdx ? 'Upcoming' : 'No running logged'}</span>`);
+  if(prevWeekMeta && prevWeekMeta.actualMi!=null && view.actualMi!=null){
+    const delta = view.actualMi - prevWeekMeta.actualMi;
+    recapBits.push(`<span>${delta>=0?'+':''}${delta.toFixed(1)}mi vs prior week (<b>${prevWeekMeta.actualMi.toFixed(1)}mi</b>)</span>`);
+  }
+  if(view.raceDayMi) recapBits.push(`<span>Race day this week 🏁</span>`);
+
+  const hasOverrides = !!(MANUAL_DATA.scheduleOverrides[view.weekStartIso] && Object.keys(MANUAL_DATA.scheduleOverrides[view.weekStartIso]).length);
+
+  const navRow = `<div class="week-nav-row">
+    <button type="button" class="week-nav-btn" id="week-nav-prev" ${idx<=0?'disabled':''}>&larr; Prev week</button>
+    <div class="week-nav-label">${fmtDate(view.weekStartIso)} – ${fmtDate(view.weekEnd)}${!isCurrent?` &middot; <button type="button" class="week-nav-jump" id="week-nav-jump">Jump to this week</button>`:''}</div>
+    <button type="button" class="week-nav-btn" id="week-nav-next" ${idx>=plan.length-1?'disabled':''}>Next week &rarr;</button>
+  </div>`;
+
+  const dayCards = DAY_ORDER.map(dk=>{
+    const s = view.sessions[dk];
+    if(!s) return '';
+    const isToday = s.date === todayIso;
+    let sub = s.detail;
+    if(s.trackable && s.dayStatus==='done' && s.actualMi!=null){
+      sub = `Planned ${s.targetMi?s.targetMi.toFixed(2)+'mi':'—'} &rarr; <b>${s.actualMi.toFixed(2)}mi</b>${s.actualPace?` @ ${paceStr(s.actualPace)}/mi`:''}`;
+    } else if(s.manualDone && !s.trackable){
+      sub = `${s.detail} — <span style="color:var(--amber)">logged manually</span>`;
+    }
+    const icon = s.dayStatus==='done' ? '✓' : (s.dayStatus==='missed' ? '!' : (s.type==='Race' ? '🏁' : ''));
+    const showCheckbox = !s.dayIsFuture && s.type !== 'Race' && (s.dayStatus==='not-tracked' || s.dayStatus==='missed' || s.manualDone);
+    const checkboxHtml = showCheckbox ? `<label class="wd-check-row" onclick="event.stopPropagation()">
+        <input type="checkbox" data-day-check="${dk}" data-date="${s.date}" ${s.manualDone?'checked':''}> Mark done
+      </label>` : '';
+    return `<div class="week-day-card ${isToday?'is-today':''} status-${s.dayStatus}" data-day-key="${dk}">
+      ${icon?`<span class="wd-status-icon">${icon}</span>`:''}
+      ${s.note?`<span class="wd-note-dot" title="Has a note">&#9998;</span>`:''}
+      <div class="wd-name">${DAY_NAMES[dk]} &middot; ${fmtDate(s.date)}${isToday?'<span class="wd-today-chip">TODAY</span>':''}</div>
+      <span class="wd-type" style="background:${planTypeColor(s.type)}">${s.type}</span>
+      <div class="wd-title">${s.title}</div>
+      <div class="wd-sub">${sub}</div>
+      ${s.swapped?`<span class="wd-swapped-tag">swapped</span>`:''}
+      ${checkboxHtml}
+    </div>`;
+  }).join('');
+
+  const resetLink = hasOverrides ? `<button type="button" class="week-reset-link" id="week-reset-schedule">↺ Reset this week's schedule to the original plan</button>` : '';
+
+  panel.innerHTML = `${navRow}<div class="week-recap">${recapBits.join('')}</div><div class="week-days">${dayCards}</div>${resetLink}
+    <div style="display:flex; justify-content:flex-end; margin-top:10px;"><span class="week-save-status" id="week-save-status"></span></div>`;
+
+  const prevBtn = document.getElementById('week-nav-prev');
+  const nextBtn = document.getElementById('week-nav-next');
+  if(prevBtn) prevBtn.addEventListener('click', ()=>{ WEEK_VIEW_IDX = Math.max(0, idx-1); renderThisWeekPanel(); });
+  if(nextBtn) nextBtn.addEventListener('click', ()=>{ WEEK_VIEW_IDX = Math.min(plan.length-1, idx+1); renderThisWeekPanel(); });
+  const jumpBtn = document.getElementById('week-nav-jump');
+  if(jumpBtn) jumpBtn.addEventListener('click', ()=>{ WEEK_VIEW_IDX = currentIdx === -1 ? 0 : currentIdx; renderThisWeekPanel(); });
+  const resetBtn = document.getElementById('week-reset-schedule');
+  if(resetBtn) resetBtn.addEventListener('click', ()=> resetWeekSchedule(view.weekStartIso));
+
+  panel.querySelectorAll('[data-day-check]').forEach(cb=>{
+    cb.addEventListener('change', (e)=>{
+      const date = e.target.getAttribute('data-date');
+      const checked = e.target.checked;
+      MANUAL_DATA.manualLogs[date] = MANUAL_DATA.manualLogs[date] || {};
+      MANUAL_DATA.manualLogs[date].done = checked;
+      renderThisWeekPanel();
+      GitHubStore.save(d=>{ d.manualLogs = d.manualLogs||{}; d.manualLogs[date] = d.manualLogs[date]||{}; d.manualLogs[date].done = checked; return d; }, `Mark ${date} ${checked?'done':'not done'}`).catch(()=>{});
+    });
+  });
+
+  panel.querySelectorAll('.week-day-card').forEach(card=>{
+    card.addEventListener('click', ()=>{
+      if(card.dataset.justDragged === '1'){ card.dataset.justDragged = '0'; return; }
+      openDayModal(idx, card.getAttribute('data-day-key'));
+    });
+  });
+
+  wireDayCardDrag(panel, idx, view);
+}
+
 function renderSplitsWindow(container, splits, view, legendId, elevProfile, mileBased, syncId){
   if(mileBased===undefined) mileBased=true; // older cached data with no flag — assume the common case
   if(!splits.length){ container.innerHTML="<p class='empty'>No splits for this run.</p>"; if(legendId){ const lg=document.getElementById(legendId); if(lg) lg.innerHTML=''; } return; }
@@ -3302,39 +3824,19 @@ safe('goal reassessment panel', function(){
 });
 
 safe('this week panel', function(){
-  const plan = DATA.planComparison || [];
-  const todayIso = DATA.meta.lastSynced;
-  const idx = plan.findIndex(w => w.weekStart <= todayIso && todayIso <= w.weekEnd);
-  const panel = document.getElementById('this-week-panel');
-  if(idx === -1){ panel.innerHTML = "<p class='empty'>No active plan week right now — see the full plan below.</p>"; return; }
-  const wk = plan[idx];
-  const prev = idx>0 ? plan[idx-1] : null;
-  const recapBits = [`<span>Week ${idx+1} of ${plan.length} &middot; <b>${wk.phase}</b></span>`];
-  if(wk.adherencePct!=null) recapBits.push(`<span>${wk.adherencePct}% of weekly target so far (<b>${(wk.actualMi||0).toFixed(1)}</b> / ${wk.plannedMi.toFixed(1)}mi)</span>`);
-  else recapBits.push(`<span>No running logged yet this week</span>`);
-  if(prev && prev.actualMi!=null && wk.actualMi!=null){
-    const delta = wk.actualMi - prev.actualMi;
-    recapBits.push(`<span>${delta>=0?'+':''}${delta.toFixed(1)}mi vs last week (<b>${prev.actualMi.toFixed(1)}mi</b>)</span>`);
-  }
-  if(wk.raceDayMi) recapBits.push(`<span>Race day this week 🏁</span>`);
-  const dayCards = DAY_ORDER.map(dk=>{
-    const s = wk.sessions[dk];
-    if(!s) return '';
-    const isToday = s.date === todayIso;
-    let sub = s.detail;
-    if(s.trackable && s.dayStatus==='done' && s.actualMi!=null){
-      sub = `Planned ${s.targetMi?s.targetMi.toFixed(2)+'mi':'—'} &rarr; <b>${s.actualMi.toFixed(2)}mi</b>${s.actualPace?` @ ${paceStr(s.actualPace)}/mi`:''}`;
-    }
-    const icon = s.dayStatus==='done' ? '✓' : (s.dayStatus==='missed' ? '!' : (s.type==='Race' ? '🏁' : ''));
-    return `<div class="week-day-card ${isToday?'is-today':''} status-${s.dayStatus}">
-      ${icon?`<span class="wd-status-icon">${icon}</span>`:''}
-      <div class="wd-name">${DAY_NAMES[dk]} &middot; ${fmtDate(s.date)}${isToday?'<span class="wd-today-chip">TODAY</span>':''}</div>
-      <span class="wd-type" style="background:${planTypeColor(s.type)}">${s.type}</span>
-      <div class="wd-title">${s.title}</div>
-      <div class="wd-sub">${sub}</div>
-    </div>`;
-  }).join('');
-  panel.innerHTML = `<div class="week-recap">${recapBits.join('')}</div><div class="week-days">${dayCards}</div>`;
+  renderThisWeekPanel();
+});
+
+safe('day modal wiring', function(){
+  const dayModal = document.getElementById('day-modal');
+  if(!dayModal) return;
+  document.getElementById('day-modal-close').addEventListener('click', closeDayModal);
+  dayModal.addEventListener('click', e=>{ if(e.target===dayModal) closeDayModal(); });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape' && dayModal.style.display!=='none') closeDayModal(); });
+  document.addEventListener('click', e=>{
+    const el = e.target.closest('#week-save-status.is-error');
+    if(el && _lastFailedSave){ GitHubStore.save(_lastFailedSave.mutate, _lastFailedSave.message).catch(()=>{}); }
+  });
 });
 
 safe('weekly volume chart', function(){ registerVolumeChart('chart-volume', 'Weekly Volume & Training Load', DATA.weekly); });

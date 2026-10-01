@@ -3098,13 +3098,23 @@ function renderRouteMap(containerId, points, opts){
       const midFrac = ((ptCum[i]+ptCum[i+1])/2)/totalPtDist;
       const pace = splitPaceAt(midFrac);
       const color = pace!=null ? paceToColor(pace, minPace, maxPace) : '#7E8EA3';
-      const seg = L.polyline([latlngs[i],latlngs[i+1]], {color, weight:4.5, opacity:0.95, lineCap:'round'}).addTo(segGroup);
+      // Purely visual — not interactive. A real GPS stream samples every 1-3
+      // seconds, so a single point-to-point segment is often just a few
+      // screen pixels long; hit-testing the hover directly against this thin
+      // (4.5px) stroke made the sync nearly impossible to trigger with a real
+      // mouse/finger, which is almost certainly why it read as "not working"
+      // rather than genuinely broken. interactive:false hands all pointer
+      // events to the wide invisible hit line below instead, the same
+      // thin-visible/wide-invisible split already used for the splits chart's
+      // own hover targets (see the hit rects in renderSplitsWindow).
+      L.polyline([latlngs[i],latlngs[i+1]], {color, weight:4.5, opacity:0.95, lineCap:'round', interactive:false}).addTo(segGroup);
       if(opts.syncId){
-        seg.on('mouseover', ()=>{
+        const hit = L.polyline([latlngs[i],latlngs[i+1]], {opacity:0, weight:22, lineCap:'round'}).addTo(segGroup);
+        hit.on('mouseover', ()=>{
           if(SPLITS_SYNC_TARGETS[opts.syncId]) SPLITS_SYNC_TARGETS[opts.syncId].setFraction(midFrac);
           if(readout){ readout.textContent = pace!=null ? `${paceStr(pace)}/mi` : '—'; readout.classList.add('show'); }
         });
-        seg.on('mouseout', ()=>{
+        hit.on('mouseout', ()=>{
           if(SPLITS_SYNC_TARGETS[opts.syncId]) SPLITS_SYNC_TARGETS[opts.syncId].clear();
           if(readout) readout.classList.remove('show');
         });

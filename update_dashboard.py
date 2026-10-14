@@ -1588,6 +1588,14 @@ HTML_SHELL = r"""<!DOCTYPE html>
     <div class="panel" id="last-run-panel"></div>
   </section>
 
+  <section id="nav-today" class="reveal-section">
+    <div class="section-head">
+      <div class="section-title">This Week's Plan</div>
+      <div class="section-note">Every day of the current training week, matched against what Garmin actually recorded. Drag a day card onto another to swap sessions, tap a card for instructions and notes.</div>
+    </div>
+    <div class="panel" id="this-week-panel"></div>
+  </section>
+
   <section id="goal-reassessment-section" class="reveal-section" style="display:none;">
     <div class="section-head">
       <div class="section-title">Goal Reassessment</div>
@@ -1637,14 +1645,6 @@ HTML_SHELL = r"""<!DOCTYPE html>
         <div class="dial-label plain-read" id="effortmix-plain" style="margin-top:8px; line-height:1.5;"></div>
       </div>
     </div>
-  </section>
-
-  <section id="nav-today" class="reveal-section">
-    <div class="section-head">
-      <div class="section-title">This Week's Plan</div>
-      <div class="section-note">Every day of the current training week, matched against what Garmin actually recorded. Drag a day card onto another to swap sessions, tap a card for instructions and notes.</div>
-    </div>
-    <div class="panel" id="this-week-panel"></div>
   </section>
 
   <section class="reveal-section">
@@ -3063,7 +3063,7 @@ const GitHubStore = (function(){
   async function readCurrent(){
     const res = await fetch(apiUrl(), { headers: { 'Authorization': `Bearer ${token()}`, 'Accept':'application/vnd.github+json' } });
     if(res.status === 404){ cachedSha = null; return {scheduleOverrides:{}, manualLogs:{}, notes:{}}; }
-    if(!res.ok) throw new Error('GitHub read failed: '+res.status);
+    if(!res.ok){ const e = new Error('GitHub read failed: '+res.status); e.status = res.status; throw e; }
     const body = await res.json();
     cachedSha = body.sha;
     try{
@@ -3082,8 +3082,8 @@ const GitHubStore = (function(){
       headers: { 'Authorization': `Bearer ${token()}`, 'Accept':'application/vnd.github+json', 'Content-Type':'application/json' },
       body: JSON.stringify(payload),
     });
-    if(res.status === 409 || res.status === 422){ const e = new Error('conflict'); e.retry = true; throw e; }
-    if(!res.ok){ const e = new Error('GitHub write failed: '+res.status); throw e; }
+    if(res.status === 409 || res.status === 422){ const e = new Error('conflict'); e.retry = true; e.status = res.status; throw e; }
+    if(!res.ok){ const e = new Error('GitHub write failed: '+res.status); e.status = res.status; throw e; }
     const body = await res.json();
     cachedSha = body.content && body.content.sha;
   }
@@ -3095,7 +3095,7 @@ const GitHubStore = (function(){
       try{ await writeOnce(mutate, message); setSaveStatus('saved'); return true; }
       catch(e){ lastErr = e; attempt++; if(!(e && e.retry) || attempt >= 3) break; }
     }
-    setSaveStatus('error');
+    setSaveStatus('error', lastErr && lastErr.status);
     _lastFailedSave = {mutate, message};
     throw lastErr;
   }
@@ -3111,14 +3111,25 @@ const GitHubStore = (function(){
 
 let _lastFailedSave = null;
 let _saveStatusTimer = null;
-function setSaveStatus(state){
+function setSaveStatus(state, status){
   const el = document.getElementById('week-save-status');
   if(!el) return;
   el.classList.remove('is-saving','is-error');
   clearTimeout(_saveStatusTimer);
   if(state==='saving'){ el.textContent = 'Saving…'; el.classList.add('is-saving'); }
   else if(state==='saved'){ el.textContent = 'All changes saved'; _saveStatusTimer = setTimeout(()=>{ if(el.textContent==='All changes saved') el.textContent=''; }, 4000); }
-  else if(state==='error'){ el.textContent = "Couldn't save — tap to retry"; el.classList.add('is-error'); }
+  else if(state==='error'){
+    // v19 — name the likely cause instead of a bare "couldn't save," so a
+    // save failure is self-diagnosable from the dashboard itself, without
+    // needing the browser's dev console. 401/403 are overwhelmingly an
+    // expired or revoked DASHBOARD_EDIT_TOKEN (see setup guide Part A, Step
+    // 5); 404 usually means the token's repo access doesn't match this repo.
+    let msg = "Couldn't save — tap to retry";
+    if(status === 401 || status === 403) msg = "Couldn't save — token may be expired (tap to retry)";
+    else if(status === 404) msg = "Couldn't save — token can't access this repo (tap to retry)";
+    el.textContent = msg;
+    el.classList.add('is-error');
+  }
   else if(state==='no-token'){ el.textContent = 'Editing not set up — see setup guide'; }
 }
 

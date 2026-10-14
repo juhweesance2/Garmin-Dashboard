@@ -1580,6 +1580,14 @@ HTML_SHELL = r"""<!DOCTYPE html>
     <div class="panel rec-panel" id="rec-panel"></div>
   </section>
 
+  <section class="reveal-section">
+    <div class="section-head">
+      <div class="section-title">Last Run</div>
+      <div class="section-note">How your most recent run went, without digging into the full log below.</div>
+    </div>
+    <div class="panel" id="last-run-panel"></div>
+  </section>
+
   <section id="goal-reassessment-section" class="reveal-section" style="display:none;">
     <div class="section-head">
       <div class="section-title">Goal Reassessment</div>
@@ -1588,12 +1596,73 @@ HTML_SHELL = r"""<!DOCTYPE html>
     <div class="panel goal-panel" id="goal-panel"></div>
   </section>
 
+  <section id="nav-recovery" class="reveal-section">
+    <div class="section-head">
+      <div class="section-title">Recovery &amp; Readiness</div>
+      <div class="section-note">The "why" behind Today's Call — today's readiness, HRV trend, and how training effort has split across intensity bands.</div>
+    </div>
+    <div class="panel-triple">
+      <div class="panel">
+        <div class="stat-label"><span class="label-with-tip">Training Readiness — Today<button type="button" class="info-tip-btn" data-info-key="readiness"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button></span></div>
+        <div class="readiness-ring-row">
+          <svg class="readiness-ring" viewBox="0 0 110 110" width="104" height="104">
+            <circle cx="55" cy="55" r="46" fill="none" class="ring-track" stroke-width="10"/>
+            <circle cx="55" cy="55" r="46" fill="none" class="ring-fill" id="readiness-ring-fill" stroke-width="10" stroke-linecap="round" transform="rotate(-90 55 55)"/>
+            <text x="55" y="51" text-anchor="middle" class="ring-number" id="readiness-score">—</text>
+            <text x="55" y="68" text-anchor="middle" class="ring-caption">/ 100</text>
+          </svg>
+          <div>
+            <span class="badge" id="readiness-badge">—</span>
+          </div>
+        </div>
+        <div class="dial-label plain-read" id="readiness-plain" style="margin-top:10px; line-height:1.5;"></div>
+        <div style="margin-top:18px; padding-top:16px; border-top:1px solid var(--border-soft);">
+          <div class="stat-label">Training Status</div>
+          <div style="display:flex; align-items:baseline; gap:8px; margin-top:8px; flex-wrap:wrap;">
+            <span class="badge good" id="training-status-badge">—</span>
+            <span class="dial-label" id="training-acwr"></span>
+            <button type="button" class="info-tip-btn" data-info-key="acwr"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
+          </div>
+          <div class="dial-label plain-read" id="acwr-plain" style="margin-top:8px; line-height:1.5;"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="stat-label"><span class="label-with-tip">HRV Trend<button type="button" class="info-tip-btn" data-info-key="hrv"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button></span></div>
+        <div class="chart-box" style="height:190px; margin-top:10px;"><div id="chart-hrv" class="svg-chart"></div></div>
+        <div class="dial-label plain-read" id="hrv-plain" style="margin-top:8px; line-height:1.5;"></div>
+      </div>
+      <div class="panel">
+        <div class="stat-label"><span class="label-with-tip">Effort Mix — Last 4 Weeks<button type="button" class="info-tip-btn" data-info-key="effortmix"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button></span></div>
+        <div class="balance-bars" id="balance-bars"></div>
+        <div class="dial-label plain-read" id="effortmix-plain" style="margin-top:8px; line-height:1.5;"></div>
+      </div>
+    </div>
+  </section>
+
   <section id="nav-today" class="reveal-section">
     <div class="section-head">
       <div class="section-title">This Week's Plan</div>
       <div class="section-note">Every day of the current training week, matched against what Garmin actually recorded. Drag a day card onto another to swap sessions, tap a card for instructions and notes.</div>
     </div>
     <div class="panel" id="this-week-panel"></div>
+  </section>
+
+  <section class="reveal-section">
+    <div class="section-head">
+      <div class="section-title">Taper &amp; Race Outlook</div>
+      <div class="section-note">Where you are in the taper, and what current training predicts for race day.</div>
+    </div>
+    <div class="panel" id="taper-outlook-panel"></div>
+    <div class="panel-split" style="margin-top:16px;">
+      <div class="panel">
+        <div class="predict-list" id="predict-list"></div>
+      </div>
+      <div class="panel">
+        <div class="score-row" id="score-row"></div>
+        <div class="chart-box" style="height:150px; margin-top:16px;"><div id="chart-vo2" class="svg-chart"></div></div>
+        <div class="chart-caption">VO2 max trend</div>
+      </div>
+    </div>
   </section>
 
   <section id="nav-training" class="reveal-section">
@@ -1606,6 +1675,7 @@ HTML_SHELL = r"""<!DOCTYPE html>
       <div class="legend-row">
         <div class="legend-item"><span class="legend-swatch" style="background:var(--text-dim)"></span>Planned miles</div>
         <div class="legend-item"><span class="legend-swatch" style="background:var(--amber)"></span>Actual miles</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:transparent; border:1.5px dashed var(--text-dim);"></span>Upcoming (not yet run)</div>
       </div>
       <div class="phase-legend-row" id="phase-legend"></div>
     </div>
@@ -1628,15 +1698,14 @@ HTML_SHELL = r"""<!DOCTYPE html>
 
   <section class="reveal-section">
     <div class="section-head">
-      <div class="section-title"><span class="section-index">02</span> Weekly Volume &amp; Training Load</div>
-      <div class="section-note">Mileage by week against your long run distance and weekly run count.</div>
+      <div class="section-title"><span class="section-index">02</span> Weekly Volume</div>
+      <div class="section-note">Mileage by week against your long run distance. Training-load risk (ACWR) lives with the rest of recovery, above.</div>
     </div>
     <div class="panel">
       <div class="chart-box tall"><div id="chart-volume" class="svg-chart"></div></div>
       <div class="legend-row">
         <div class="legend-item"><span class="legend-swatch" style="background:var(--amber)"></span>Weekly miles</div>
         <div class="legend-item"><span class="legend-swatch" style="background:var(--blue)"></span>Long run distance</div>
-        <div class="legend-item"><span class="legend-swatch" style="background:var(--teal);"></span>Runs per week</div>
         <div class="legend-item">★ Peak week, all-time</div>
       </div>
     </div>
@@ -1645,11 +1714,16 @@ HTML_SHELL = r"""<!DOCTYPE html>
   <section class="reveal-section">
     <div class="section-head">
       <div class="section-title"><span class="section-index">03</span> Pace Progression</div>
-      <div class="section-note">Every run's average pace, colored by workout type, with a 5-run rolling average.</div>
+      <div class="section-note">Every run's average pace, colored by workout type — a reference scatter, not a single trend line across different kinds of effort.</div>
     </div>
     <div class="panel">
       <div class="chart-box tall"><div id="chart-pace" class="svg-chart"></div></div>
       <div class="legend-row" id="pace-legend"></div>
+    </div>
+    <div class="panel" style="margin-top:16px;">
+      <div class="stat-label"><span class="label-with-tip">Aerobic Efficiency — Easy &amp; Long Runs<button type="button" class="info-tip-btn" data-info-key="efficiency"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button></span></div>
+      <div class="chart-box" style="height:190px; margin-top:10px;"><div id="chart-efficiency" class="svg-chart"></div></div>
+      <div class="chart-caption">Speed per heartbeat, rising = more efficient. The trustworthy "is fitness improving" read — isolated to easy/long effort, so it isn't thrown off by hot days, hills, or a hard interval session.</div>
     </div>
   </section>
 
@@ -1661,70 +1735,9 @@ HTML_SHELL = r"""<!DOCTYPE html>
     <div id="insights" style="display:flex; flex-direction:column; gap:10px;"></div>
   </section>
 
-  <section id="nav-recovery" class="reveal-section">
-    <div class="section-head">
-      <div class="section-title"><span class="section-index">05</span> Recovery &amp; Readiness</div>
-      <div class="section-note">Today's readiness, HRV trend, and how training effort has split across intensity bands.</div>
-    </div>
-    <div class="panel-triple">
-      <div class="panel">
-        <div class="stat-label"><span class="label-with-tip">Training Readiness — Today<button type="button" class="info-tip-btn" data-info-key="readiness"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button></span></div>
-        <div class="readiness-ring-row">
-          <svg class="readiness-ring" viewBox="0 0 110 110" width="104" height="104">
-            <circle cx="55" cy="55" r="46" fill="none" class="ring-track" stroke-width="10"/>
-            <circle cx="55" cy="55" r="46" fill="none" class="ring-fill" id="readiness-ring-fill" stroke-width="10" stroke-linecap="round" transform="rotate(-90 55 55)"/>
-            <text x="55" y="51" text-anchor="middle" class="ring-number" id="readiness-score">—</text>
-            <text x="55" y="68" text-anchor="middle" class="ring-caption">/ 100</text>
-          </svg>
-          <div>
-            <span class="badge" id="readiness-badge">—</span>
-          </div>
-        </div>
-        <div style="margin-top:18px; padding-top:16px; border-top:1px solid var(--border-soft);">
-          <div class="stat-label">Training Status</div>
-          <div style="display:flex; align-items:baseline; gap:8px; margin-top:8px; flex-wrap:wrap;">
-            <span class="badge good" id="training-status-badge">—</span>
-            <span class="dial-label" id="training-acwr"></span>
-            <button type="button" class="info-tip-btn" data-info-key="acwr"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
-          </div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="stat-label"><span class="label-with-tip">HRV Trend<button type="button" class="info-tip-btn" data-info-key="hrv"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button></span></div>
-        <div class="chart-box" style="height:190px; margin-top:10px;"><div id="chart-hrv" class="svg-chart"></div></div>
-      </div>
-      <div class="panel">
-        <div class="stat-label"><span class="label-with-tip">Effort Mix — Last 4 Weeks<button type="button" class="info-tip-btn" data-info-key="effortmix"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button></span></div>
-        <div class="balance-bars" id="balance-bars"></div>
-      </div>
-    </div>
-  </section>
-
   <section class="reveal-section">
     <div class="section-head">
-      <div class="section-title"><span class="section-index">06</span> Fitness Trend</div>
-      <div class="section-note">Garmin's race-time predictions and fitness scores from current training data.</div>
-    </div>
-    <div class="panel-split">
-      <div class="panel">
-        <div class="predict-list" id="predict-list"></div>
-      </div>
-      <div class="panel">
-        <div class="score-row" id="score-row"></div>
-        <div class="chart-box" style="height:150px; margin-top:16px;"><div id="chart-vo2" class="svg-chart"></div></div>
-        <div class="chart-caption">VO2 max trend</div>
-      </div>
-    </div>
-    <div class="panel" style="margin-top:16px;">
-      <div class="stat-label"><span class="label-with-tip">Aerobic Efficiency — Easy &amp; Long Runs<button type="button" class="info-tip-btn" data-info-key="efficiency"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button></span></div>
-      <div class="chart-box" style="height:190px; margin-top:10px;"><div id="chart-efficiency" class="svg-chart"></div></div>
-      <div class="chart-caption">Speed per heartbeat, rising = more efficient. A better read on aerobic fitness than pace alone, since it's not thrown off by hot days or hills.</div>
-    </div>
-  </section>
-
-  <section class="reveal-section">
-    <div class="section-head">
-      <div class="section-title"><span class="section-index">07</span> Long Run Splits</div>
+      <div class="section-title"><span class="section-index">05</span> Long Run Splits</div>
       <div class="section-note">Mile-by-mile pace, heart rate and elevation for each long run this cycle.</div>
     </div>
     <div class="panel" id="splits-panel">
@@ -1737,7 +1750,7 @@ HTML_SHELL = r"""<!DOCTYPE html>
 
   <section id="nav-runs" class="reveal-section">
     <div class="section-head">
-      <div class="section-title"><span class="section-index">08</span> Full Run Log</div>
+      <div class="section-title"><span class="section-index">06</span> Full Run Log</div>
       <div class="section-note" id="table-note">Click a column to sort · click a row for splits, cadence, HR and route.</div>
     </div>
     <div class="panel">
@@ -1974,6 +1987,19 @@ section{ margin-top:56px; }
 .tone-good .rec-notes li::before{ background:var(--good); }
 .tone-caution .rec-notes li::before{ background:var(--critical); }
 .rec-disclaimer{ font-size:11px; color:var(--text-dim); margin-top:12px; font-style:italic; }
+/* v18 — Last Run card */
+.lastrun-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+.lastrun-title{ font-family:var(--font-display); font-weight:700; font-size:clamp(16px,3.4vw,19px); margin-top:2px; }
+.lastrun-stats{ display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--border); margin-top:14px; }
+@media (max-width:640px){ .lastrun-stats{ grid-template-columns:1fr; } }
+/* v18 — Taper & Race Outlook */
+.taper-track{ height:10px; background:var(--bg-inset); position:relative; margin-top:12px; border-radius:var(--radius); }
+.taper-fill{ position:absolute; top:0; bottom:0; left:0; background:var(--accent); border-radius:var(--radius); }
+.taper-marker{ position:absolute; top:-5px; width:2px; height:20px; background:var(--text); }
+.taper-marker span{ position:absolute; top:-18px; left:50%; transform:translateX(-50%); font-family:var(--font-mono); font-size:10px; color:var(--text-dim); white-space:nowrap; }
+.taper-note{ margin-top:12px; font-size:12px; color:var(--text-dim); font-family:var(--font-mono); }
+.taper-stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--border); margin-top:28px; }
+@media (max-width:720px){ .taper-stats{ grid-template-columns:repeat(2,1fr); } }
 .predict-list{ display:flex; flex-direction:column; gap:2px; }
 .predict-row{ display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid var(--border-soft); font-family:var(--font-mono); font-size:14px; }
 .predict-row.highlight{ background:var(--accent-dim); border-radius:var(--radius); font-weight:600; border-bottom-color:transparent; }
@@ -2692,7 +2718,7 @@ safe('chart zoom modal', function(){
 // when nothing is zoomed.
 function renderVolumeWindow(container, weekly, view){
   if(!weekly.length){ container.innerHTML="<p class='empty'>No weekly data yet.</p>"; return; }
-  const {w:W,h:H}=chartSize(container,720,300), M={top:26,right:40,bottom:34,left:42};
+  const {w:W,h:H}=chartSize(container,720,300), M={top:26,right:20,bottom:34,left:42};
   container._plotMargins = M;
   const plotW=W-M.left-M.right, plotH=H-M.top-M.bottom;
   const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'none'});
@@ -2702,13 +2728,10 @@ function renderVolumeWindow(container, weekly, view){
   const maxMiles=Math.max(...visibleIdx.map(i=>weekly[i].miles),1);
   const yTicks=niceTicks(0,maxMiles,5), yMax=yTicks[yTicks.length-1];
   const yScale=v=>M.top+plotH-(v/yMax)*plotH;
-  const runsMax=Math.max(6,...visibleIdx.map(i=>weekly[i].runs));
-  const y1Scale=v=>M.top+plotH-(v/runsMax)*plotH;
   const bandW=plotW/(view.end-view.start), xCenter=i=>M.left+(i-view.start)*bandW+bandW/2;
   const volLabels=labelIndices(visibleIdx.length, plotW, widestLabelPx(visibleIdx.map(i=>weekly[i].label)));
   yTicks.forEach(t=>{ svg.appendChild(el('line',{class:'grid-line',x1:M.left,x2:W-M.right,y1:yScale(t),y2:yScale(t)})); const lbl=el('text',{x:M.left-8,y:yScale(t)+3,'text-anchor':'end'}); lbl.textContent=t; svg.appendChild(lbl); });
   const yTitle=el('text',{x:10,y:12}); yTitle.textContent='miles'; svg.appendChild(yTitle);
-  const y1Title=el('text',{x:W-M.right,y:12,'text-anchor':'end'}); y1Title.textContent='runs/wk'; svg.appendChild(y1Title);
   const milesBarW=Math.min(bandW*0.44,70), lrBarW=Math.min(bandW*0.24,36);
   const clipId='vol-clip-'+Math.random().toString(36).slice(2);
   const clip=el('clipPath',{id:clipId}); clip.appendChild(el('rect',{x:M.left,y:M.top,width:plotW,height:plotH})); svg.appendChild(clip);
@@ -2737,9 +2760,6 @@ function renderVolumeWindow(container, weekly, view){
     }
     if(volLabels.has(k)){ const xl=el('text',{x:cx,y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=w.label; svg.appendChild(xl); }
   });
-  let linePath=''; visibleIdx.forEach((i,k)=>{ const x=xCenter(i), y=y1Scale(weekly[i].runs); linePath+=(k===0?'M':'L')+x+','+y+' '; });
-  svg.appendChild(el('path',{d:linePath.trim(),fill:'none',stroke:'#2FD480','stroke-width':2,'clip-path':`url(#${clipId})`}));
-  visibleIdx.forEach(i=>{ const w=weekly[i]; const c=el('circle',{class:'data-point',cx:xCenter(i),cy:y1Scale(w.runs),r:3.5,fill:'#2FD480'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.label}</div><div class="tt-row">Runs: <b>${w.runs}</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
   container.appendChild(svg);
@@ -2807,6 +2827,15 @@ function renderPlanWindow(container, planWeeks, view){
       aBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.weekLabel}</div><div class="tt-row">${w.phase}</div><div class="tt-row">Actual: <b>${w.actualMi.toFixed(1)}mi</b></div>${w.adherencePct!=null?`<div class="tt-row">Adherence: <b>${w.adherencePct}%</b></div>`:''}`));
       aBar.addEventListener('mousemove',positionTooltip); aBar.addEventListener('mouseleave',hideTooltip);
       svg.appendChild(aBar);
+    } else if(w.status==='upcoming'){
+      // v18 — distinguishes "hasn't happened yet" from "no data for a past
+      // week": a dashed ghost outline at the planned height, instead of
+      // leaving this blank next to a solid actual bar (which reads as zero).
+      const aBarX=cx+2, aBarY=yScale(w.plannedMi||0);
+      const aBar=el('rect',{class:'data-point upcoming-bar',x:aBarX,y:aBarY,width:actualBarW,height:(M.top+plotH)-aBarY,fill:'none',stroke:'#737373','stroke-width':1.5,'stroke-dasharray':'3,3',rx:2});
+      aBar.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">Week of ${w.weekLabel}</div><div class="tt-row">${w.phase}</div><div class="tt-row" style="color:#737373;">Upcoming — not yet run</div>`));
+      aBar.addEventListener('mousemove',positionTooltip); aBar.addEventListener('mouseleave',hideTooltip);
+      svg.appendChild(aBar);
     }
     if(i===raceWeekIdx){
       const flag=el('text',{x:cx,y:M.top-10,'text-anchor':'middle'});
@@ -2838,10 +2867,6 @@ function renderPaceWindow(container, runs, view){
   const n=runs.length;
   const lo=Math.max(0,Math.floor(view.start)), hi=Math.min(n-1,Math.ceil(view.end));
   const visibleIdx=[]; for(let i=lo;i<=hi;i++) visibleIdx.push(i);
-  // The rolling average is computed over the FULL series (up to 4 runs before
-  // each point) so the trend line at the left edge of a zoomed window still
-  // reflects real prior history instead of restarting from whatever's on screen.
-  const rolling=runs.map((r,i)=>{ const w=runs.slice(Math.max(0,i-4),i+1); return w.reduce((s,x)=>s+x.paceMinMi,0)/w.length; });
   const paces=visibleIdx.map(i=>runs[i].paceMinMi);
   const minP=Math.min(...paces)-0.6, maxP=Math.max(...paces)+0.6;
   const yTicks=niceTicks(minP,maxP,5);
@@ -2851,10 +2876,6 @@ function renderPaceWindow(container, runs, view){
   const yTitle=el('text',{x:6,y:12}); yTitle.textContent='min/mile'; svg.appendChild(yTitle);
   const paceLabels=labelIndices(visibleIdx.length, plotW, widestLabelPx(visibleIdx.map(i=>runs[i].dateLabel)));
   visibleIdx.forEach((i,k)=>{ if(paceLabels.has(k)){ const xl=el('text',{x:xScale(i),y:H-M.bottom+16,'text-anchor':'middle'}); xl.textContent=runs[i].dateLabel; svg.appendChild(xl); } });
-  const clipId='pace-clip-'+Math.random().toString(36).slice(2);
-  const clip=el('clipPath',{id:clipId}); clip.appendChild(el('rect',{x:M.left,y:M.top,width:plotW,height:plotH})); svg.appendChild(clip);
-  let path=''; visibleIdx.forEach((i,k)=>{ path+=(k===0?'M':'L')+xScale(i)+','+yScale(rolling[i])+' '; });
-  svg.appendChild(el('path',{d:path.trim(),fill:'none',stroke:'#FAFAFA','stroke-width':1.5,'stroke-dasharray':'4,3','clip-path':`url(#${clipId})`}));
   visibleIdx.forEach(i=>{ const r=runs[i]; const c=el('circle',{class:'data-point',cx:xScale(i),cy:yScale(r.paceMinMi),r:5,fill:TYPE_COLORS[r.type]||'#7E8EA3'}); c.addEventListener('mouseenter',e=>showTooltip(e,`<div class="tt-title">${r.name}</div><div class="tt-row">${fmtDate(r.date)} · ${r.type}</div><div class="tt-row">Pace: <b>${paceStr(r.paceMinMi)}/mi</b></div><div class="tt-row">Dist: <b>${r.distMi.toFixed(1)}mi</b></div>`)); c.addEventListener('mousemove',positionTooltip); c.addEventListener('mouseleave',hideTooltip); svg.appendChild(c); });
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:M.left,y1:M.top,y2:M.top+plotH}));
   svg.appendChild(el('line',{class:'axis-line',x1:M.left,x2:W-M.right,y1:M.top+plotH,y2:M.top+plotH}));
@@ -3866,7 +3887,7 @@ function renderRouteMap(containerId, points, opts){
 // data, reset the zoom" — see registerZoomChart's doc comment above.
 let RUNS_ASC=null, PACED_RUNS_ASC=null, ACTIVE_SPLIT_ID=null, HRV_PTS=null, VO2_PTS=null, EF_PTS=null, CURRENT_RUN_ID=null;
 function redrawCharts(){
-  safe('redraw volume', ()=>registerVolumeChart('chart-volume', 'Weekly Volume & Training Load', DATA.weekly));
+  safe('redraw volume', ()=>registerVolumeChart('chart-volume', 'Weekly Volume', DATA.weekly));
   safe('redraw plan', ()=>registerPlanChart('chart-plan', 'Plan vs. Actual', DATA.planComparison));
   safe('redraw pace', ()=>{ if(PACED_RUNS_ASC) registerPaceChart('chart-pace', 'Pace Progression', PACED_RUNS_ASC); });
   safe('redraw hrv', ()=>{ if(HRV_PTS) registerSeriesChart('chart-hrv', 'HRV Trend', HRV_PTS, 'hrv', '#2FD480'); });
@@ -3966,7 +3987,7 @@ safe('day modal wiring', function(){
   });
 });
 
-safe('weekly volume chart', function(){ registerVolumeChart('chart-volume', 'Weekly Volume & Training Load', DATA.weekly); });
+safe('weekly volume chart', function(){ registerVolumeChart('chart-volume', 'Weekly Volume', DATA.weekly); });
 
 safe('plan vs actual', function(){
   const plan = DATA.planComparison || [];
@@ -3999,7 +4020,7 @@ safe('pace progression chart', function(){
   PACED_RUNS_ASC = runsAsc.filter(r=>r.paceMinMi);
   registerPaceChart('chart-pace', 'Pace Progression', PACED_RUNS_ASC);
   const types = [...new Set(DATA.runs.map(r=>r.type))];
-  document.getElementById('pace-legend').innerHTML = types.map(t=>`<div class="legend-item"><span class="legend-swatch" style="background:${TYPE_COLORS[t]}"></span>${t}</div>`).join('') + `<div class="legend-item"><span class="legend-swatch" style="background:#FAFAFA"></span>5-run rolling avg</div>`;
+  document.getElementById('pace-legend').innerHTML = types.map(t=>`<div class="legend-item"><span class="legend-swatch" style="background:${TYPE_COLORS[t]}"></span>${t}</div>`).join('');
 });
 
 safe('insights', function(){
@@ -4040,6 +4061,128 @@ safe('recovery panel', function(){
   } else {
     document.getElementById('balance-bars').innerHTML = "<p class='empty'>Not enough recent runs to compute an effort mix.</p>";
   }
+
+  // v18 — plain-English reads, visible by default instead of only reachable
+  // by tapping the info icon (which explains what the metric IS, not what
+  // TODAY'S value means). These are grounded in the same numbers already on
+  // screen; the info-tip-btn + INFO_TIPS definitions above stay as-is for
+  // anyone who wants the fuller explanation.
+  const readinessPlain = (!r || r.score==null) ? ''
+    : r.score>=70 ? 'Good to go — handle a harder effort today if the plan calls for one.'
+    : r.score>=50 ? 'Fine for an easy effort. Hold off anything hard until this climbs back toward 70+.'
+    : 'Low — consider an easy day or rest, even if the plan says otherwise.';
+  document.getElementById('readiness-plain').textContent = readinessPlain;
+
+  const acwr = DATA.acwr;
+  const acwrPlain = acwr==null ? ''
+    : acwr<0.8 ? `${acwr.toFixed(2)} — below the safe 0.8–1.5 band. Fine for now, but a sign of detraining if mileage stays this low.`
+    : acwr<=1.5 ? `${acwr.toFixed(2)} — inside the safe 0.8–1.5 band. Building steadily, no spike risk this week.`
+    : `${acwr.toFixed(2)} — above the safe 0.8–1.5 band. This week's load jumped sharply versus recent weeks, a classic injury-risk spike.`;
+  document.getElementById('acwr-plain').textContent = acwrPlain;
+
+  const hrvVals = HRV_PTS.map(p=>p.hrv);
+  const hrvBaseline = hrvVals.length ? hrvVals.reduce((s,x)=>s+x,0)/hrvVals.length : null;
+  const hrvToday = DATA.hrvToday && typeof DATA.hrvToday.hrv==='number' ? DATA.hrvToday.hrv : null;
+  let hrvPlain = '';
+  if(hrvBaseline!=null && hrvToday!=null){
+    const diff = hrvToday - hrvBaseline;
+    if(Math.abs(diff) <= Math.max(2, hrvBaseline*0.08)){
+      hrvPlain = `${diff>=0?'+':''}${diff.toFixed(1)}ms vs. your recent baseline — within normal day-to-day noise, not a flag.`;
+    } else if(diff < 0){
+      hrvPlain = `${diff.toFixed(1)}ms below your recent baseline — an early sign of accumulated fatigue; worth an easy day if it persists.`;
+    } else {
+      hrvPlain = `+${diff.toFixed(1)}ms above your recent baseline — well recovered.`;
+    }
+  }
+  document.getElementById('hrv-plain').textContent = hrvPlain;
+
+  let effortPlain = '';
+  if(mix){
+    if(mix.hardPct>15 || mix.moderatePct>20){
+      effortPlain = `Running a bit harder than the 80/20-style target (${mix.hardPct}% hard, target under 15%). Not urgent, but worth easing back toward mostly-easy.`;
+    } else if(mix.easyPct>=65){
+      effortPlain = `Comfortably inside the 80/20-style target — mostly easy effort, as intended.`;
+    } else {
+      effortPlain = `A bit light on easy running relative to the target — worth keeping more of your volume conversational.`;
+    }
+  }
+  document.getElementById('effortmix-plain').textContent = effortPlain;
+});
+
+safe('last run panel', function(){
+  const runs = DATA.runs; // sorted most-recent-first
+  const el2 = document.getElementById('last-run-panel');
+  if(!runs || !runs.length){ el2.innerHTML = "<p class='empty'>No runs logged yet.</p>"; return; }
+  const last = runs[0];
+  const sameType = runs.filter(r=>r.type===last.type && r.id!==last.id && r.paceMinMi).slice(0,6);
+  const avgPace = sameType.length ? sameType.reduce((s,x)=>s+x.paceMinMi,0)/sameType.length : null;
+  let paceNote = '';
+  if(avgPace!=null && last.paceMinMi){
+    const diffSec = Math.round((avgPace-last.paceMinMi)*60);
+    if(Math.abs(diffSec)>=5){
+      paceNote = diffSec>0
+        ? `${diffSec}s/mi faster than your last ${sameType.length} ${last.type.toLowerCase()} run${sameType.length===1?'':'s'}.`
+        : `${Math.abs(diffSec)}s/mi slower than your last ${sameType.length} ${last.type.toLowerCase()} run${sameType.length===1?'':'s'}.`;
+    } else {
+      paceNote = `In line with your recent ${last.type.toLowerCase()} pace.`;
+    }
+  }
+  el2.innerHTML = `
+    <div class="lastrun-head">
+      <div><div class="dial-label">${fmtDate(last.date)}</div><div class="lastrun-title">${last.name || last.type}</div></div>
+      <span class="badge">${last.type}</span>
+    </div>
+    <div class="lastrun-stats">
+      <div class="stat-cell"><div class="stat-label">Distance</div><div class="stat-value">${last.distMi.toFixed(1)}<span class="stat-unit">mi</span></div></div>
+      <div class="stat-cell"><div class="stat-label">Avg Pace</div><div class="stat-value">${last.paceMinMi?paceStr(last.paceMinMi):'—'}<span class="stat-unit">/mi</span></div></div>
+      <div class="stat-cell"><div class="stat-label">Avg HR</div><div class="stat-value">${last.avgHr??'—'}<span class="stat-unit">bpm</span></div></div>
+    </div>
+    ${paceNote?`<div class="dial-label" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-soft);">${paceNote}</div>`:''}
+  `;
+  el2.style.cursor = 'pointer';
+  el2.addEventListener('click', ()=>{ if(window.openRunModal) window.openRunModal(last.id); });
+});
+
+safe('taper outlook', function(){
+  const plan = DATA.planComparison || [];
+  const panel = document.getElementById('taper-outlook-panel');
+  if(!plan.length){ panel.innerHTML = "<p class='empty'>No training plan loaded.</p>"; return; }
+  const today = new Date(DATA.meta.lastSynced);
+  const weekly = DATA.weekly || [];
+  const peak = weekly.length ? weekly.reduce((m,w)=>w.miles>m.miles?w:m, weekly[0]) : null;
+  const currentPlanWeek = plan.find(w=> new Date(w.weekStart)<=today && today<=new Date(w.weekEnd));
+  const taperWeek = plan.find(w=>/taper/i.test(w.phase));
+  const raceWeek = plan[plan.length-1];
+  const raceDate = new Date(DATA.meta.raceDate);
+  let pct = 0, taperStarted = false, daysUntilTaper = null;
+  if(taperWeek){
+    const taperStart = new Date(taperWeek.weekStart);
+    daysUntilTaper = Math.round((taperStart-today)/86400000);
+    if(today>=taperStart){
+      taperStarted = true;
+      const span = raceDate-taperStart;
+      pct = span>0 ? Math.max(0,Math.min(100,((today-taperStart)/span)*100)) : 100;
+    }
+  }
+  const currentMiles = currentPlanWeek ? (currentPlanWeek.actualMi ?? currentPlanWeek.plannedMi) : null;
+  // v18 — the "You are here" marker only means something once the taper has
+  // actually started (pct>0); before that, a floating label pinned at 0%
+  // would hang half off the left edge of the track, so show a plain note
+  // below the bar instead.
+  const markerLeft = Math.max(4, Math.min(96, pct));
+  const trackHtml = taperStarted
+    ? `<div class="taper-track"><div class="taper-fill" style="width:${pct.toFixed(0)}%;"></div><div class="taper-marker" style="left:${markerLeft.toFixed(0)}%;"><span>You are here</span></div></div>`
+    : `<div class="taper-track"></div><div class="taper-note">${daysUntilTaper!=null?`Taper begins in ${daysUntilTaper}d`:'Taper not yet scheduled'}</div>`;
+  panel.innerHTML = `
+    <div class="stat-label">Taper Progress</div>
+    ${trackHtml}
+    <div class="taper-stats">
+      <div class="stat-cell"><div class="stat-label">This week</div><div class="stat-value">${currentMiles!=null?currentMiles.toFixed(1):'—'}<span class="stat-unit">mi</span></div></div>
+      <div class="stat-cell"><div class="stat-label">Peak week</div><div class="stat-value">${peak?peak.miles.toFixed(1):'—'}<span class="stat-unit">mi</span></div>${peak?`<div class="dial-label">${peak.label}</div>`:''}</div>
+      <div class="stat-cell"><div class="stat-label">Race week target</div><div class="stat-value">${raceWeek?(raceWeek.plannedMi||0).toFixed(1):'—'}<span class="stat-unit">mi</span></div></div>
+      <div class="stat-cell"><div class="stat-label">${taperStarted?'Taper began':'Taper begins'}</div><div class="stat-value" style="font-size:16px;">${taperWeek?fmtDate(taperWeek.weekStart):'—'}</div>${(!taperStarted && daysUntilTaper!=null)?`<div class="dial-label">${daysUntilTaper}d away</div>`:''}</div>
+    </div>
+  `;
 });
 
 safe('fitness trend', function(){
